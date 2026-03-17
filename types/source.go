@@ -1,9 +1,9 @@
 package types
 
 type Source struct {
-	SourceType       string
-	ID               string
-	URL              string
-	Title            string
-	ProviderMetadata map[string]any
+	SourceType       string         `json:"sourceType"`
+	ID               string         `json:"id"`
+	URL              string         `json:"url"`
+	Title            string         `json:"title,omitempty"`
+	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }

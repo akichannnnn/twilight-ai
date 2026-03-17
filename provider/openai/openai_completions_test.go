@@ -61,7 +61,7 @@ func TestDoGenerate(t *testing.T) {
 		Model: model,
 		Messages: []types.Message{{
 			Role:  types.MessageRoleUser,
-			Parts: []types.MessagePart{types.TextPart{Text: "Hi"}},
+			Content: []types.MessagePart{types.TextPart{Text: "Hi"}},
 		}},
 	})
 	if err != nil {
@@ -115,7 +115,7 @@ func TestDoStream(t *testing.T) {
 		Model: model,
 		Messages: []types.Message{{
 			Role:  types.MessageRoleUser,
-			Parts: []types.MessagePart{types.TextPart{Text: "Hi"}},
+			Content: []types.MessagePart{types.TextPart{Text: "Hi"}},
 		}},
 	})
 	if err != nil {
@@ -146,6 +146,376 @@ func TestDoStream(t *testing.T) {
 	}
 	if collected != "Hello world" {
 		t.Errorf("expected 'Hello world', got %q", collected)
+	}
+}
+
+func TestDoGenerate_WithImage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content any    `json:"content"`
+			} `json:"messages"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		if len(body.Messages) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(body.Messages))
+		}
+
+		parts, ok := body.Messages[0].Content.([]any)
+		if !ok {
+			t.Fatalf("expected array content, got %T", body.Messages[0].Content)
+		}
+		if len(parts) != 2 {
+			t.Fatalf("expected 2 content parts, got %d", len(parts))
+		}
+
+		textPart := parts[0].(map[string]any)
+		if textPart["type"] != "text" || textPart["text"] != "What is in this image?" {
+			t.Errorf("unexpected text part: %v", textPart)
+		}
+
+		imgPart := parts[1].(map[string]any)
+		if imgPart["type"] != "image_url" {
+			t.Errorf("expected image_url type, got %v", imgPart["type"])
+		}
+		imgURL := imgPart["image_url"].(map[string]any)
+		if imgURL["url"] != "https://example.com/cat.png" {
+			t.Errorf("unexpected image url: %v", imgURL["url"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-img",
+			"object":  "chat.completion",
+			"created": 1700000000,
+			"model":   "gpt-4o-mini",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "A cat."},
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     20,
+				"completion_tokens": 3,
+				"total_tokens":      23,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(
+		openai.WithAPIKey("test-key"),
+		openai.WithBaseURL(srv.URL),
+	)
+
+	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
+		Model: &types.Model{ID: "gpt-4o-mini"},
+		Messages: []types.Message{{
+			Role: types.MessageRoleUser,
+			Content: []types.MessagePart{
+				types.TextPart{Text: "What is in this image?"},
+				types.ImagePart{Image: "https://example.com/cat.png", MediaType: "image/png"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+
+	if result.Text != "A cat." {
+		t.Errorf("expected 'A cat.', got %q", result.Text)
+	}
+	if result.Usage.InputTokens != 20 {
+		t.Errorf("expected 20 input tokens, got %d", result.Usage.InputTokens)
+	}
+}
+
+func TestDoGenerate_ToolCall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []struct {
+				Type     string `json:"type"`
+				Function struct {
+					Name        string `json:"name"`
+					Description string `json:"description"`
+					Parameters  any    `json:"parameters"`
+				} `json:"function"`
+			} `json:"tools"`
+			ToolChoice string `json:"tool_choice"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		if len(body.Tools) != 1 {
+			t.Fatalf("expected 1 tool, got %d", len(body.Tools))
+		}
+		if body.Tools[0].Function.Name != "get_weather" {
+			t.Errorf("tool name: got %q", body.Tools[0].Function.Name)
+		}
+		if body.ToolChoice != "auto" {
+			t.Errorf("tool_choice: got %q", body.ToolChoice)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-tool", "object": "chat.completion", "model": "gpt-4o-mini",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "tool_calls",
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "",
+					"tool_calls": []map[string]any{{
+						"id":   "call_abc123",
+						"type": "function",
+						"function": map[string]any{
+							"name":      "get_weather",
+							"arguments": `{"location":"Beijing"}`,
+						},
+					}},
+				},
+			}},
+			"usage": map[string]any{"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+		})
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
+
+	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
+		Model: &types.Model{ID: "gpt-4o-mini"},
+		Messages: []types.Message{{
+			Role:    types.MessageRoleUser,
+			Content: []types.MessagePart{types.TextPart{Text: "What's the weather in Beijing?"}},
+		}},
+		Tools: []types.Tool{{
+			Name:        "get_weather",
+			Description: "Get the weather for a location",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"location": map[string]any{"type": "string"},
+				},
+				"required": []string{"location"},
+			},
+		}},
+		ToolChoice: "auto",
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+
+	if result.FinishReason != types.FinishReasonToolCalls {
+		t.Errorf("finish: got %q, want %q", result.FinishReason, types.FinishReasonToolCalls)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("tool calls: got %d, want 1", len(result.ToolCalls))
+	}
+	tc := result.ToolCalls[0]
+	if tc.ToolCallID != "call_abc123" {
+		t.Errorf("tool call id: got %q", tc.ToolCallID)
+	}
+	if tc.ToolName != "get_weather" {
+		t.Errorf("tool name: got %q", tc.ToolName)
+	}
+	input, ok := tc.Input.(map[string]any)
+	if !ok {
+		t.Fatalf("input type: got %T", tc.Input)
+	}
+	if input["location"] != "Beijing" {
+		t.Errorf("location: got %v", input["location"])
+	}
+}
+
+func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		if len(body.Messages) != 3 {
+			t.Fatalf("expected 3 messages, got %d", len(body.Messages))
+		}
+
+		// verify assistant message has tool_calls
+		var assistantMsg struct {
+			Role      string `json:"role"`
+			ToolCalls []struct {
+				ID       string `json:"id"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		}
+		json.Unmarshal(body.Messages[1], &assistantMsg)
+		if assistantMsg.Role != "assistant" {
+			t.Errorf("msg[1] role: got %q", assistantMsg.Role)
+		}
+		if len(assistantMsg.ToolCalls) != 1 || assistantMsg.ToolCalls[0].ID != "call_abc" {
+			t.Errorf("msg[1] tool_calls: %+v", assistantMsg.ToolCalls)
+		}
+
+		// verify tool result message
+		var toolMsg struct {
+			Role       string `json:"role"`
+			ToolCallID string `json:"tool_call_id"`
+			Content    string `json:"content"`
+		}
+		json.Unmarshal(body.Messages[2], &toolMsg)
+		if toolMsg.Role != "tool" {
+			t.Errorf("msg[2] role: got %q", toolMsg.Role)
+		}
+		if toolMsg.ToolCallID != "call_abc" {
+			t.Errorf("msg[2] tool_call_id: got %q", toolMsg.ToolCallID)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-2", "object": "chat.completion", "model": "gpt-4o-mini",
+			"choices": []map[string]any{{
+				"index": 0, "finish_reason": "stop",
+				"message": map[string]any{"role": "assistant", "content": "It's sunny in Beijing."},
+			}},
+			"usage": map[string]any{"prompt_tokens": 30, "completion_tokens": 8, "total_tokens": 38},
+		})
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
+
+	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
+		Model: &types.Model{ID: "gpt-4o-mini"},
+		Messages: []types.Message{
+			{
+				Role:    types.MessageRoleUser,
+				Content: []types.MessagePart{types.TextPart{Text: "Weather?"}},
+			},
+			{
+				Role: types.MessageRoleAssistant,
+				Content: []types.MessagePart{types.ToolCallPart{
+					ToolCallID: "call_abc",
+					ToolName:   "get_weather",
+					Input:      map[string]any{"location": "Beijing"},
+				}},
+			},
+			{
+				Role: types.MessageRoleTool,
+				Content: []types.MessagePart{types.ToolResultPart{
+					ToolCallID: "call_abc",
+					ToolName:   "get_weather",
+					Result:     map[string]any{"temp": 25, "condition": "sunny"},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+
+	if result.Text != "It's sunny in Beijing." {
+		t.Errorf("text: got %q", result.Text)
+	}
+}
+
+func TestDoStream_ToolCall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+
+		chunks := []string{
+			// first chunk: tool call start with id and name
+			`{"id":"chunk-1","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_xyz","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}`,
+			// second chunk: arguments delta
+			`{"id":"chunk-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"location\""}}]},"finish_reason":null}]}`,
+			// third chunk: arguments continued
+			`{"id":"chunk-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"Tokyo\"}"}}]},"finish_reason":null}]}`,
+			// finish
+			`{"id":"chunk-1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
+
+	sr, err := p.DoStream(context.Background(), types.GenerateParams{
+		Model: &types.Model{ID: "gpt-4o-mini"},
+		Messages: []types.Message{{
+			Role:    types.MessageRoleUser,
+			Content: []types.MessagePart{types.TextPart{Text: "Weather in Tokyo?"}},
+		}},
+		Tools: []types.Tool{{Name: "get_weather", Parameters: map[string]any{"type": "object"}}},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var (
+		gotInputStart  bool
+		gotInputEnd    bool
+		argsDelta      string
+		gotToolCall    *types.StreamToolCallPart
+		gotFinishStep  bool
+		gotFinish      bool
+	)
+
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *types.ToolInputStartPart:
+			gotInputStart = true
+			if p.ToolName != "get_weather" {
+				t.Errorf("input start tool name: got %q", p.ToolName)
+			}
+		case *types.ToolInputDeltaPart:
+			argsDelta += p.Delta
+		case *types.ToolInputEndPart:
+			gotInputEnd = true
+		case *types.StreamToolCallPart:
+			gotToolCall = p
+		case *types.FinishStepPart:
+			gotFinishStep = true
+			if p.FinishReason != types.FinishReasonToolCalls {
+				t.Errorf("finish step reason: got %q", p.FinishReason)
+			}
+		case *types.FinishPart:
+			gotFinish = true
+		case *types.ErrorPart:
+			t.Fatalf("error: %v", p.Error)
+		}
+	}
+
+	if !gotInputStart {
+		t.Error("missing ToolInputStartPart")
+	}
+	if !gotInputEnd {
+		t.Error("missing ToolInputEndPart")
+	}
+	if argsDelta != `{"location":"Tokyo"}` {
+		t.Errorf("args delta: got %q", argsDelta)
+	}
+	if gotToolCall == nil {
+		t.Fatal("missing StreamToolCallPart")
+	}
+	if gotToolCall.ToolCallID != "call_xyz" || gotToolCall.ToolName != "get_weather" {
+		t.Errorf("tool call: %+v", gotToolCall)
+	}
+	input, ok := gotToolCall.Input.(map[string]any)
+	if !ok || input["location"] != "Tokyo" {
+		t.Errorf("tool call input: %+v", gotToolCall.Input)
+	}
+	if !gotFinishStep {
+		t.Error("missing FinishStepPart")
+	}
+	if !gotFinish {
+		t.Error("missing FinishPart")
 	}
 }
 
@@ -201,7 +571,7 @@ func TestIntegration_DoGenerate(t *testing.T) {
 		Model: integrationModel(t),
 		Messages: []types.Message{{
 			Role:  types.MessageRoleUser,
-			Parts: []types.MessagePart{types.TextPart{Text: "Say hello in one word."}},
+			Content: []types.MessagePart{types.TextPart{Text: "Say hello in one word."}},
 		}},
 	})
 	if err != nil {
@@ -221,7 +591,7 @@ func TestIntegration_DoStream(t *testing.T) {
 		Model: integrationModel(t),
 		Messages: []types.Message{{
 			Role:  types.MessageRoleUser,
-			Parts: []types.MessagePart{types.TextPart{Text: "Count from 1 to 5."}},
+			Content: []types.MessagePart{types.TextPart{Text: "Count from 1 to 5."}},
 		}},
 	})
 	if err != nil {

@@ -1,22 +1,22 @@
 package types
 
 type InputTokenDetail struct {
-	NoCacheTokens    int
-	CacheReadTokens  int
-	CacheWriteTokens int
+	NoCacheTokens    int `json:"noCacheTokens"`
+	CacheReadTokens  int `json:"cacheReadTokens"`
+	CacheWriteTokens int `json:"cacheWriteTokens"`
 }
 
 type OutputTokenDetail struct {
-	TextTokens      int
-	ReasoningTokens int
+	TextTokens      int `json:"textTokens"`
+	ReasoningTokens int `json:"reasoningTokens"`
 }
 
 type Usage struct {
-	InputTokens        int
-	OutputTokens       int
-	TotalTokens        int
-	ReasoningTokens    int
-	CachedInputTokens  int
-	InputTokenDetails  InputTokenDetail
-	OutputTokenDetails OutputTokenDetail
+	InputTokens        int               `json:"inputTokens"`
+	OutputTokens       int               `json:"outputTokens"`
+	TotalTokens        int               `json:"totalTokens"`
+	ReasoningTokens    int               `json:"reasoningTokens,omitempty"`
+	CachedInputTokens  int               `json:"cachedInputTokens,omitempty"`
+	InputTokenDetails  InputTokenDetail  `json:"inputTokenDetails,omitempty"`
+	OutputTokenDetails OutputTokenDetail `json:"outputTokenDetails,omitempty"`
 }

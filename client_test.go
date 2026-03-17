@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	twilightai "github.com/memohai/twilight-ai"
-	"github.com/memohai/twilight-ai/internal/chat"
 	"github.com/memohai/twilight-ai/internal/testutil"
 	"github.com/memohai/twilight-ai/provider/openai"
 	"github.com/memohai/twilight-ai/types"
@@ -26,33 +25,31 @@ func envOrSkip(t *testing.T, key string) string {
 	return v
 }
 
-func newClient(t *testing.T) *twilightai.Client {
+func newProvider(t *testing.T) *openai.OpenAICompletionsProvider {
 	t.Helper()
 	apiKey := envOrSkip(t, "OPENAI_API_KEY")
 	opts := []openai.OpenAICompletionsProviderOption{openai.WithAPIKey(apiKey)}
 	if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
 		opts = append(opts, openai.WithBaseURL(base))
 	}
-	return twilightai.NewClient(twilightai.WithProvider(openai.NewCompletions(opts...)))
+	return openai.NewCompletions(opts...)
 }
 
 func model(t *testing.T) *types.Model {
 	t.Helper()
-	m := os.Getenv("OPENAI_MODEL")
-	if m == "" {
-		m = "gpt-4o-mini"
+	id := os.Getenv("OPENAI_MODEL")
+	if id == "" {
+		id = "gpt-4o-mini"
 	}
-	return &types.Model{ID: m}
+	return newProvider(t).ChatModel(id)
 }
 
 func TestClient_GenerateText(t *testing.T) {
-	c := newClient(t)
-	text, err := c.GenerateText(context.Background(),
-		chat.WithModel(model(t)),
-		chat.WithMessages([]types.Message{{
-			Role:  types.MessageRoleUser,
-			Parts: []types.MessagePart{types.TextPart{Text: "Say hi in one word."}},
-		}}),
+	text, err := twilightai.GenerateText(context.Background(),
+		twilightai.WithModel(model(t)),
+		twilightai.WithMessages([]types.Message{
+			types.UserMessage("Say hi in one word."),
+		}),
 	)
 	if err != nil {
 		t.Fatalf("GenerateText: %v", err)
@@ -64,13 +61,11 @@ func TestClient_GenerateText(t *testing.T) {
 }
 
 func TestClient_GenerateTextResult(t *testing.T) {
-	c := newClient(t)
-	result, err := c.GenerateTextResult(context.Background(),
-		chat.WithModel(model(t)),
-		chat.WithMessages([]types.Message{{
-			Role:  types.MessageRoleUser,
-			Parts: []types.MessagePart{types.TextPart{Text: "Say hi in one word."}},
-		}}),
+	result, err := twilightai.GenerateTextResult(context.Background(),
+		twilightai.WithModel(model(t)),
+		twilightai.WithMessages([]types.Message{
+			types.UserMessage("Say hi in one word."),
+		}),
 	)
 	if err != nil {
 		t.Fatalf("GenerateTextResult: %v", err)
@@ -88,13 +83,11 @@ func TestClient_GenerateTextResult(t *testing.T) {
 }
 
 func TestClient_StreamText(t *testing.T) {
-	c := newClient(t)
-	sr, err := c.StreamText(context.Background(),
-		chat.WithModel(model(t)),
-		chat.WithMessages([]types.Message{{
-			Role:  types.MessageRoleUser,
-			Parts: []types.MessagePart{types.TextPart{Text: "Count from 1 to 3."}},
-		}}),
+	sr, err := twilightai.StreamText(context.Background(),
+		twilightai.WithModel(model(t)),
+		twilightai.WithMessages([]types.Message{
+			types.UserMessage("Count from 1 to 3."),
+		}),
 	)
 	if err != nil {
 		t.Fatalf("StreamText: %v", err)
@@ -114,5 +107,54 @@ func TestClient_StreamText(t *testing.T) {
 	t.Logf("streamed: %q", text)
 	if text == "" {
 		t.Error("expected non-empty streamed text")
+	}
+}
+
+func TestClient_StreamText_ToResult(t *testing.T) {
+	sr, err := twilightai.StreamText(context.Background(),
+		twilightai.WithModel(model(t)),
+		twilightai.WithMessages([]types.Message{
+			types.UserMessage("Say hello in one word."),
+		}),
+	)
+	if err != nil {
+		t.Fatalf("StreamText: %v", err)
+	}
+
+	result, err := sr.ToResult()
+	if err != nil {
+		t.Fatalf("ToResult: %v", err)
+	}
+	t.Logf("text=%q finish=%s", result.Text, result.FinishReason)
+	if result.Text == "" {
+		t.Error("expected non-empty text")
+	}
+}
+
+func TestClient_WithSystem(t *testing.T) {
+	text, err := twilightai.GenerateText(context.Background(),
+		twilightai.WithModel(model(t)),
+		twilightai.WithSystem("You always respond with exactly one word."),
+		twilightai.WithMessages([]types.Message{
+			types.UserMessage("Greet me."),
+		}),
+	)
+	if err != nil {
+		t.Fatalf("GenerateText: %v", err)
+	}
+	t.Logf("response: %q", text)
+	if text == "" {
+		t.Error("expected non-empty response")
+	}
+}
+
+func TestClient_NoModel(t *testing.T) {
+	_, err := twilightai.GenerateText(context.Background(),
+		twilightai.WithMessages([]types.Message{
+			types.UserMessage("Hi"),
+		}),
+	)
+	if err == nil {
+		t.Fatal("expected error for nil model")
 	}
 }

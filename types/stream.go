@@ -215,3 +215,60 @@ func (p *RawPart) Type() StreamPartType { return StreamPartTypeRaw }
 type StreamResult struct {
 	Stream <-chan StreamPart
 }
+
+// Text consumes the entire stream and returns the concatenated text content.
+func (sr *StreamResult) Text() (string, error) {
+	var text string
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *TextDeltaPart:
+			text += p.Text
+		case *ErrorPart:
+			return text, p.Error
+		}
+	}
+	return text, nil
+}
+
+// ToResult consumes the entire stream and assembles a GenerateResult.
+func (sr *StreamResult) ToResult() (*GenerateResult, error) {
+	result := &GenerateResult{}
+	var reasoning string
+
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *TextDeltaPart:
+			result.Text += p.Text
+		case *ReasoningDeltaPart:
+			reasoning += p.Text
+		case *StreamToolCallPart:
+			result.ToolCalls = append(result.ToolCalls, ToolCall{
+				ToolCallID: p.ToolCallID,
+				ToolName:   p.ToolName,
+				Input:      p.Input,
+			})
+		case *StreamToolResultPart:
+			result.ToolResults = append(result.ToolResults, ToolResult{
+				ToolCallID: p.ToolCallID,
+				ToolName:   p.ToolName,
+				Input:      p.Input,
+				Output:     p.Output,
+			})
+		case *StreamSourcePart:
+			result.Sources = append(result.Sources, p.Source)
+		case *StreamFilePart:
+			result.Files = append(result.Files, p.File)
+		case *FinishStepPart:
+			result.Response = p.Response
+		case *FinishPart:
+			result.FinishReason = p.FinishReason
+			result.RawFinishReason = p.RawFinishReason
+			result.Usage = p.TotalUsage
+		case *ErrorPart:
+			return result, p.Error
+		}
+	}
+
+	result.Reasoning = reasoning
+	return result, nil
+}

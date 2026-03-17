@@ -1,5 +1,10 @@
 package types
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 type MessageRole string
 
 const (
@@ -27,7 +32,7 @@ type MessagePart interface {
 // --- Text ---
 
 type TextPart struct {
-	Text string
+	Text string `json:"text"`
 }
 
 func (p TextPart) PartType() MessagePartType { return MessagePartTypeText }
@@ -35,8 +40,8 @@ func (p TextPart) PartType() MessagePartType { return MessagePartTypeText }
 // --- Reasoning ---
 
 type ReasoningPart struct {
-	Text      string
-	Signature string
+	Text      string `json:"text"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func (p ReasoningPart) PartType() MessagePartType { return MessagePartTypeReasoning }
@@ -44,8 +49,8 @@ func (p ReasoningPart) PartType() MessagePartType { return MessagePartTypeReason
 // --- Image ---
 
 type ImagePart struct {
-	Image     string // URL or base64 encoded data
-	MediaType string
+	Image     string `json:"image"`
+	MediaType string `json:"mediaType,omitempty"`
 }
 
 func (p ImagePart) PartType() MessagePartType { return MessagePartTypeImage }
@@ -53,9 +58,9 @@ func (p ImagePart) PartType() MessagePartType { return MessagePartTypeImage }
 // --- File ---
 
 type FilePart struct {
-	Data      string // base64 encoded data or URL
-	MediaType string
-	Filename  string
+	Data      string `json:"data"`
+	MediaType string `json:"mediaType,omitempty"`
+	Filename  string `json:"filename,omitempty"`
 }
 
 func (p FilePart) PartType() MessagePartType { return MessagePartTypeFile }
@@ -63,9 +68,9 @@ func (p FilePart) PartType() MessagePartType { return MessagePartTypeFile }
 // --- Tool Call (in assistant messages) ---
 
 type ToolCallPart struct {
-	ToolCallID string
-	ToolName   string
-	Input      any
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	Input      any    `json:"input"`
 }
 
 func (p ToolCallPart) PartType() MessagePartType { return MessagePartTypeToolCall }
@@ -73,10 +78,10 @@ func (p ToolCallPart) PartType() MessagePartType { return MessagePartTypeToolCal
 // --- Tool Result (in tool messages) ---
 
 type ToolResultPart struct {
-	ToolCallID string
-	ToolName   string
-	Result     any
-	IsError    bool
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	Result     any    `json:"result"`
+	IsError    bool   `json:"isError,omitempty"`
 }
 
 func (p ToolResultPart) PartType() MessagePartType { return MessagePartTypeToolResult }
@@ -84,6 +89,119 @@ func (p ToolResultPart) PartType() MessagePartType { return MessagePartTypeToolR
 // --- Message ---
 
 type Message struct {
-	Role  MessageRole
-	Parts []MessagePart
+	Role    MessageRole   `json:"role"`
+	Content []MessagePart `json:"content"`
+}
+
+// --- Convenience constructors ---
+
+// UserMessage creates a user message with one or more text parts.
+func UserMessage(text string, extra ...MessagePart) Message {
+	parts := []MessagePart{TextPart{Text: text}}
+	parts = append(parts, extra...)
+	return Message{Role: MessageRoleUser, Content: parts}
+}
+
+// SystemMessage creates a system message with a single text part.
+func SystemMessage(text string) Message {
+	return Message{Role: MessageRoleSystem, Content: []MessagePart{TextPart{Text: text}}}
+}
+
+// AssistantMessage creates an assistant message with a single text part.
+func AssistantMessage(text string) Message {
+	return Message{Role: MessageRoleAssistant, Content: []MessagePart{TextPart{Text: text}}}
+}
+
+// ToolMessage creates a tool-role message containing one or more ToolResultParts.
+func ToolMessage(results ...ToolResultPart) Message {
+	parts := make([]MessagePart, len(results))
+	for i, r := range results {
+		parts[i] = r
+	}
+	return Message{Role: MessageRoleTool, Content: parts}
+}
+
+// --- JSON ---
+
+func (m Message) MarshalJSON() ([]byte, error) {
+	parts := make([]json.RawMessage, 0, len(m.Content))
+	for _, p := range m.Content {
+		raw, err := marshalPart(p)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, raw)
+	}
+	return json.Marshal(struct {
+		Role    MessageRole       `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	}{Role: m.Role, Content: parts})
+}
+
+func (m *Message) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Role    MessageRole       `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	m.Role = raw.Role
+	m.Content = make([]MessagePart, 0, len(raw.Content))
+	for _, r := range raw.Content {
+		p, err := unmarshalPart(r)
+		if err != nil {
+			return err
+		}
+		m.Content = append(m.Content, p)
+	}
+	return nil
+}
+
+func marshalPart(p MessagePart) (json.RawMessage, error) {
+	type typed struct {
+		Type MessagePartType `json:"type"`
+	}
+	base, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	typeJSON, _ := json.Marshal(typed{Type: p.PartType()})
+
+	// merge {"type":"..."} into the part's JSON
+	merged := make(map[string]json.RawMessage)
+	json.Unmarshal(typeJSON, &merged)
+	json.Unmarshal(base, &merged)
+	return json.Marshal(merged)
+}
+
+func unmarshalPart(data json.RawMessage) (MessagePart, error) {
+	var probe struct {
+		Type MessagePartType `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("unmarshal message part type: %w", err)
+	}
+	switch probe.Type {
+	case MessagePartTypeText:
+		var p TextPart
+		return p, json.Unmarshal(data, &p)
+	case MessagePartTypeReasoning:
+		var p ReasoningPart
+		return p, json.Unmarshal(data, &p)
+	case MessagePartTypeImage:
+		var p ImagePart
+		return p, json.Unmarshal(data, &p)
+	case MessagePartTypeFile:
+		var p FilePart
+		return p, json.Unmarshal(data, &p)
+	case MessagePartTypeToolCall:
+		var p ToolCallPart
+		return p, json.Unmarshal(data, &p)
+	case MessagePartTypeToolResult:
+		var p ToolResultPart
+		return p, json.Unmarshal(data, &p)
+	default:
+		return nil, fmt.Errorf("unknown message part type: %q", probe.Type)
+	}
 }

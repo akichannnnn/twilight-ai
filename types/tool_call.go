@@ -1,14 +1,14 @@
 package types
 
 type ToolCall struct {
-	ToolCallID string
-	ToolName   string
-	Input      any
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	Input      any    `json:"input"`
 }
 
 type ToolResult struct {
-	ToolCallID string
-	ToolName   string
-	Input      any
-	Output     any
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	Input      any    `json:"input"`
+	Output     any    `json:"output"`
 }

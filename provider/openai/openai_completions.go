@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
 	"github.com/memohai/twilight-ai/types"
@@ -32,6 +33,12 @@ func WithBaseURL(baseURL string) OpenAICompletionsProviderOption {
 	}
 }
 
+func WithHTTPClient(client *http.Client) OpenAICompletionsProviderOption {
+	return func(p *OpenAICompletionsProvider) {
+		p.httpClient = client
+	}
+}
+
 func NewCompletions(options ...OpenAICompletionsProviderOption) *OpenAICompletionsProvider {
 	provider := &OpenAICompletionsProvider{
 		baseURL:    defaultBaseURL,
@@ -50,6 +57,17 @@ func (p *OpenAICompletionsProvider) Name() string {
 func (p *OpenAICompletionsProvider) GetModels() ([]types.Model, error) {
 	return nil, nil
 }
+
+// ChatModel creates a Model bound to this provider.
+func (p *OpenAICompletionsProvider) ChatModel(id string) *types.Model {
+	return &types.Model{
+		ID:       id,
+		Provider: p,
+		Type:     types.ModelTypeChat,
+	}
+}
+
+// ---------- DoGenerate ----------
 
 func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params types.GenerateParams) (*types.GenerateResult, error) {
 	if params.Model == nil {
@@ -72,10 +90,12 @@ func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params types
 	return p.parseResponse(resp), nil
 }
 
+// ---------- buildRequest ----------
+
 func (p *OpenAICompletionsProvider) buildRequest(params types.GenerateParams) *chatRequest {
 	req := &chatRequest{
 		Model:               params.Model.ID,
-		Messages:            convertMessages(params.Messages),
+		Messages:            convertMessages(params),
 		Temperature:         params.Temperature,
 		TopP:                params.TopP,
 		MaxCompletionTokens: params.MaxTokens,
@@ -87,16 +107,110 @@ func (p *OpenAICompletionsProvider) buildRequest(params types.GenerateParams) *c
 	if len(params.StopSequences) > 0 {
 		req.Stop = params.StopSequences
 	}
+	if len(params.Tools) > 0 {
+		req.Tools = convertTools(params.Tools)
+		req.ToolChoice = params.ToolChoice
+	}
+	if params.ResponseFormat != nil {
+		req.ResponseFormat = &chatRespFormat{
+			Type:       string(params.ResponseFormat.Type),
+			JSONSchema: params.ResponseFormat.JSONSchema,
+		}
+	}
 	return req
 }
 
-func convertMessages(messages []types.Message) []chatMessage {
-	out := make([]chatMessage, 0, len(messages))
-	for _, msg := range messages {
-		out = append(out, chatMessage{
-			Role:    string(msg.Role),
-			Content: convertContent(msg.Parts),
+func convertTools(tools []types.Tool) []chatTool {
+	out := make([]chatTool, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, chatTool{
+			Type: "function",
+			Function: chatFunction{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.Parameters,
+			},
 		})
+	}
+	return out
+}
+
+// ---------- message conversion ----------
+
+func convertMessages(params types.GenerateParams) []chatMessage {
+	var out []chatMessage
+
+	if params.System != "" {
+		out = append(out, chatMessage{
+			Role:    "system",
+			Content: params.System,
+		})
+	}
+
+	for _, msg := range params.Messages {
+		out = append(out, convertMessage(msg)...)
+	}
+	return out
+}
+
+func convertMessage(msg types.Message) []chatMessage {
+	switch msg.Role {
+	case types.MessageRoleTool:
+		return convertToolResultMessages(msg)
+	case types.MessageRoleAssistant:
+		return []chatMessage{convertAssistantMessage(msg)}
+	default:
+		return []chatMessage{{
+			Role:    string(msg.Role),
+			Content: convertContent(msg.Content),
+		}}
+	}
+}
+
+func convertAssistantMessage(msg types.Message) chatMessage {
+	cm := chatMessage{Role: "assistant"}
+
+	var contentParts []types.MessagePart
+	var toolCalls []chatToolCall
+
+	for _, part := range msg.Content {
+		switch p := part.(type) {
+		case types.ToolCallPart:
+			args, _ := json.Marshal(p.Input)
+			toolCalls = append(toolCalls, chatToolCall{
+				ID:   p.ToolCallID,
+				Type: "function",
+				Function: chatFunctionCall{
+					Name:      p.ToolName,
+					Arguments: string(args),
+				},
+			})
+		default:
+			contentParts = append(contentParts, part)
+		}
+	}
+
+	if len(contentParts) > 0 {
+		cm.Content = convertContent(contentParts)
+	}
+	if len(toolCalls) > 0 {
+		cm.ToolCalls = toolCalls
+	}
+
+	return cm
+}
+
+func convertToolResultMessages(msg types.Message) []chatMessage {
+	var out []chatMessage
+	for _, part := range msg.Content {
+		if trp, ok := part.(types.ToolResultPart); ok {
+			content, _ := json.Marshal(trp.Result)
+			out = append(out, chatMessage{
+				Role:       "tool",
+				ToolCallID: trp.ToolCallID,
+				Content:    string(content),
+			})
+		}
 	}
 	return out
 }
@@ -113,29 +227,54 @@ func convertContent(parts []types.MessagePart) any {
 		switch p := part.(type) {
 		case types.TextPart:
 			out = append(out, chatContentPartText{Type: "text", Text: p.Text})
+		case types.ReasoningPart:
+			out = append(out, chatContentPartText{Type: "text", Text: p.Text})
 		case types.ImagePart:
 			out = append(out, chatContentPartImage{
 				Type:     "image_url",
 				ImageURL: chatImageURL{URL: p.Image},
 			})
+		case types.FilePart:
+			out = append(out, chatContentPartText{Type: "text", Text: p.Data})
 		}
 	}
 	return out
 }
 
+// ---------- parseResponse ----------
+
 func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) *types.GenerateResult {
 	result := &types.GenerateResult{
 		Usage: convertUsage(&resp.Usage),
+		Response: types.ResponseMetadata{
+			ID:        resp.ID,
+			ModelID:   resp.Model,
+			Timestamp: time.Unix(resp.Created, 0),
+		},
 	}
 
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
 		result.Text = choice.Message.Content
+		result.Reasoning = choice.Message.ReasoningContent
 		result.FinishReason = mapFinishReason(choice.FinishReason)
+		result.RawFinishReason = choice.FinishReason
+
+		for _, tc := range choice.Message.ToolCalls {
+			var input any
+			json.Unmarshal([]byte(tc.Function.Arguments), &input)
+			result.ToolCalls = append(result.ToolCalls, types.ToolCall{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Input:      input,
+			})
+		}
 	}
 
 	return result
 }
+
+// ---------- DoStream ----------
 
 func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.GenerateParams) (*types.StreamResult, error) {
 	if params.Model == nil {
@@ -152,9 +291,15 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 		defer close(ch)
 
 		var (
-			textStartSent bool
-			finishReason  types.FinishReason
-			usage         types.Usage
+			textStartSent      bool
+			reasoningStartSent bool
+			rawFinishReason    string
+			finishReason       types.FinishReason
+			usage              types.Usage
+			chunkID            string
+			chunkModel         string
+			chunkCreated       int64
+			pendingToolCalls   = map[int]*streamingToolCall{}
 		)
 
 		send := func(part types.StreamPart) bool {
@@ -167,6 +312,9 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 		}
 
 		if !send(&types.StartPart{}) {
+			return
+		}
+		if !send(&types.StartStepPart{}) {
 			return
 		}
 
@@ -187,6 +335,12 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 				return err
 			}
 
+			if chunkID == "" {
+				chunkID = chunk.ID
+				chunkModel = chunk.Model
+				chunkCreated = chunk.Created
+			}
+
 			if chunk.Usage != nil {
 				usage = convertUsage(chunk.Usage)
 			}
@@ -196,7 +350,21 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 			}
 			choice := chunk.Choices[0]
 
+			// reasoning content (e.g. DeepSeek, o1-compatible providers)
+			if choice.Delta.ReasoningContent != "" {
+				if !reasoningStartSent {
+					send(&types.ReasoningStartPart{ID: chunk.ID})
+					reasoningStartSent = true
+				}
+				send(&types.ReasoningDeltaPart{ID: chunk.ID, Text: choice.Delta.ReasoningContent})
+			}
+
+			// text content
 			if choice.Delta.Content != "" {
+				if reasoningStartSent {
+					send(&types.ReasoningEndPart{ID: chunk.ID})
+					reasoningStartSent = false
+				}
 				if !textStartSent {
 					send(&types.TextStartPart{ID: chunk.ID})
 					textStartSent = true
@@ -204,16 +372,60 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 				send(&types.TextDeltaPart{ID: chunk.ID, Text: choice.Delta.Content})
 			}
 
-			if choice.FinishReason != nil && *choice.FinishReason != "" {
-				finishReason = mapFinishReason(*choice.FinishReason)
+			// tool call deltas
+			for _, tc := range choice.Delta.ToolCalls {
+				stc, exists := pendingToolCalls[tc.Index]
+				if !exists {
+					stc = &streamingToolCall{}
+					pendingToolCalls[tc.Index] = stc
+					stc.id = tc.ID
+					stc.name = tc.Function.Name
+					send(&types.ToolInputStartPart{
+						ID:       tc.ID,
+						ToolName: tc.Function.Name,
+					})
+				}
+				if tc.Function.Arguments != "" {
+					stc.args += tc.Function.Arguments
+					send(&types.ToolInputDeltaPart{
+						ID:    stc.id,
+						Delta: tc.Function.Arguments,
+					})
+				}
+			}
 
+			// finish
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				rawFinishReason = *choice.FinishReason
+				finishReason = mapFinishReason(rawFinishReason)
+
+				if reasoningStartSent {
+					send(&types.ReasoningEndPart{ID: chunk.ID})
+				}
 				if textStartSent {
 					send(&types.TextEndPart{ID: chunk.ID})
 				}
 
+				for _, stc := range pendingToolCalls {
+					send(&types.ToolInputEndPart{ID: stc.id})
+					var input any
+					json.Unmarshal([]byte(stc.args), &input)
+					send(&types.StreamToolCallPart{
+						ToolCallID: stc.id,
+						ToolName:   stc.name,
+						Input:      input,
+					})
+				}
+
 				send(&types.FinishStepPart{
-					FinishReason: finishReason,
-					Usage:        usage,
+					FinishReason:    finishReason,
+					RawFinishReason: rawFinishReason,
+					Usage:           usage,
+					Response: types.ResponseMetadata{
+						ID:        chunkID,
+						ModelID:   chunkModel,
+						Timestamp: time.Unix(chunkCreated, 0),
+					},
 				})
 			}
 
@@ -225,13 +437,22 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 		}
 
 		send(&types.FinishPart{
-			FinishReason: finishReason,
-			TotalUsage:   usage,
+			FinishReason:    finishReason,
+			RawFinishReason: rawFinishReason,
+			TotalUsage:      usage,
 		})
 	}()
 
 	return &types.StreamResult{Stream: ch}, nil
 }
+
+type streamingToolCall struct {
+	id   string
+	name string
+	args string
+}
+
+// ---------- helpers ----------
 
 func convertUsage(u *chatUsage) types.Usage {
 	usage := types.Usage{

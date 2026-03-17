@@ -12,29 +12,48 @@ const (
 	FinishReasonUnknown       FinishReason = "unknown"
 )
 
-type GenerateParams struct {
-	Model    *Model
-	Messages []Message
+type ResponseFormatType string
 
-	Temperature      *float64
-	TopP             *float64
-	MaxTokens        *int
-	StopSequences    []string
-	FrequencyPenalty *float64
-	PresencePenalty  *float64
-	Seed             *int
-	ReasoningEffort  *string
+const (
+	ResponseFormatText       ResponseFormatType = "text"
+	ResponseFormatJSONObject ResponseFormatType = "json_object"
+	ResponseFormatJSONSchema ResponseFormatType = "json_schema"
+)
+
+type ResponseFormat struct {
+	Type       ResponseFormatType `json:"type"`
+	JSONSchema any                `json:"jsonSchema,omitempty"`
+}
+
+type GenerateParams struct {
+	Model    *Model    `json:"model,omitempty"`
+	System   string    `json:"system,omitempty"`
+	Messages []Message `json:"messages,omitempty"`
+
+	Tools      []Tool `json:"tools,omitempty"`
+	ToolChoice any    `json:"toolChoice,omitempty"` // "auto", "none", "required", or {"type":"function","function":{"name":"..."}}
+
+	ResponseFormat *ResponseFormat `json:"responseFormat,omitempty"`
+
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"topP,omitempty"`
+	MaxTokens        *int     `json:"maxTokens,omitempty"`
+	StopSequences    []string `json:"stopSequences,omitempty"`
+	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
+	PresencePenalty  *float64 `json:"presencePenalty,omitempty"`
+	Seed             *int     `json:"seed,omitempty"`
+	ReasoningEffort  *string  `json:"reasoningEffort,omitempty"`
 }
 
 type GenerateResult struct {
-	Text            string
-	Reasoning       string
-	FinishReason    FinishReason
-	RawFinishReason string
-	Usage           Usage
-	Sources         []Source
-	Files           []GeneratedFile
-	ToolCalls       []ToolCall
-	ToolResults     []ToolResult
-	Response        ResponseMetadata
+	Text            string           `json:"text"`
+	Reasoning       string           `json:"reasoning,omitempty"`
+	FinishReason    FinishReason     `json:"finishReason"`
+	RawFinishReason string           `json:"rawFinishReason,omitempty"`
+	Usage           Usage            `json:"usage"`
+	Sources         []Source         `json:"sources,omitempty"`
+	Files           []GeneratedFile  `json:"files,omitempty"`
+	ToolCalls       []ToolCall       `json:"toolCalls,omitempty"`
+	ToolResults     []ToolResult     `json:"toolResults,omitempty"`
+	Response        ResponseMetadata `json:"response,omitempty"`
 }

@@ -24,4 +24,14 @@ func StreamText(ctx context.Context, options ...GenerateOption) (*StreamResult, 
 	return defaultClient.StreamText(ctx, options...)
 }
 
+// --- Embedding convenience functions ---
+
+func Embed(ctx context.Context, value string, options ...EmbedOption) ([]float64, error) {
+	return defaultClient.Embed(ctx, value, options...)
+}
+
+func EmbedMany(ctx context.Context, values []string, options ...EmbedOption) (*EmbedResult, error) {
+	return defaultClient.EmbedMany(ctx, values, options...)
+}
+
 var defaultClient = &Client{}

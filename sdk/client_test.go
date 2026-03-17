@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/memohai/twilight-ai/internal/testutil"
-	"github.com/memohai/twilight-ai/provider/openai"
+	"github.com/memohai/twilight-ai/provider/openai/completions"
 	"github.com/memohai/twilight-ai/sdk"
 )
 
@@ -27,14 +27,14 @@ func envOrSkip(t *testing.T, key string) string {
 	return v
 }
 
-func newProvider(t *testing.T) *openai.OpenAICompletionsProvider {
+func newProvider(t *testing.T) *completions.Provider {
 	t.Helper()
 	apiKey := envOrSkip(t, "OPENAI_API_KEY")
-	opts := []openai.OpenAICompletionsProviderOption{openai.WithAPIKey(apiKey)}
+	opts := []completions.Option{completions.WithAPIKey(apiKey)}
 	if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
-		opts = append(opts, openai.WithBaseURL(base))
+		opts = append(opts, completions.WithBaseURL(base))
 	}
-	return openai.NewCompletions(opts...)
+	return completions.New(opts...)
 }
 
 func model(t *testing.T) *sdk.Model {

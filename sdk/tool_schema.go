@@ -12,6 +12,7 @@ import (
 //
 // Accepted types:
 //   - *jsonschema.Schema: returned as-is
+//   - map[string]any: treated as raw JSON Schema and unmarshaled
 //   - Go struct (or pointer to struct): schema is inferred via jsonschema.ForType
 //   - nil: returns nil
 func resolveSchema(v any) (*jsonschema.Schema, error) {
@@ -21,12 +22,23 @@ func resolveSchema(v any) (*jsonschema.Schema, error) {
 	if s, ok := v.(*jsonschema.Schema); ok {
 		return s, nil
 	}
+	if m, ok := v.(map[string]any); ok {
+		data, err := json.Marshal(m)
+		if err != nil {
+			return nil, fmt.Errorf("twilightai: marshal map schema: %w", err)
+		}
+		var s jsonschema.Schema
+		if err := json.Unmarshal(data, &s); err != nil {
+			return nil, fmt.Errorf("twilightai: unmarshal map schema: %w", err)
+		}
+		return &s, nil
+	}
 	t := reflect.TypeOf(v)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("twilightai: Parameters must be *jsonschema.Schema or a struct, got %T", v)
+		return nil, fmt.Errorf("twilightai: Parameters must be *jsonschema.Schema, map[string]any, or a struct, got %T", v)
 	}
 	return jsonschema.ForType(t, nil)
 }

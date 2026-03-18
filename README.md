@@ -11,12 +11,12 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 - **Provider-agnostic** — swap between OpenAI, Anthropic, Google, or any OpenAI-compatible endpoint
 - **Model discovery** — `ListModels` fetches available models, `Test` checks provider connectivity and model support
 - **Tool calling** — define tools with Go structs, SDK infers JSON Schema and handles multi-step execution
+- **MCP support** — connect to MCP servers and expose remote MCP tools as Twilight AI `sdk.Tool` values
 - **Streaming** — first-class channel-based streaming with fine-grained `StreamPart` types
 - **Multi-step execution** — automatic tool-call loop with configurable `MaxSteps`
 - **Rich message types** — text, images, files, reasoning content, tool calls/results
 - **Embeddings** — generate embeddings with `Embed` / `EmbedMany`, supports OpenAI and Google providers
 - **Approval flow** — optional human-in-the-loop approval for sensitive tool calls
-- **Minimal dependencies** — only [google/jsonschema-go](https://github.com/google/jsonschema-go) beyond the standard library
 
 ## Installation
 
@@ -179,6 +179,75 @@ result, err := sdk.GenerateTextResult(ctx,
 )
 ```
 
+### MCP Tool Calling
+
+You can also load tools from an MCP server and use them like normal Twilight AI tools:
+
+```go
+import (
+    "context"
+    "log"
+    "os/exec"
+
+    "github.com/memohai/twilight-ai/provider/openai/completions"
+    "github.com/memohai/twilight-ai/sdk"
+    "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// HTTP / streamable MCP
+mcpClient, err := sdk.CreateMCPClient(context.Background(), &sdk.MCPClientConfig{
+    Type: sdk.MCPTransportHTTP, // default; may be omitted
+    URL:  "https://example.com/mcp",
+    Headers: map[string]string{
+        "Authorization": "Bearer <token>",
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer mcpClient.Close()
+
+tools, err := mcpClient.Tools(context.Background())
+if err != nil {
+    log.Fatal(err)
+}
+
+provider := completions.New(completions.WithAPIKey("sk-..."))
+model := provider.ChatModel("gpt-4o-mini")
+
+result, err := sdk.GenerateTextResult(context.Background(),
+    sdk.WithModel(model),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("Use the available MCP tools to answer this request."),
+    }),
+    sdk.WithTools(tools),
+    sdk.WithMaxSteps(5),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+log.Println(result.Text)
+```
+
+For stdio, create the MCP transport yourself with the official MCP Go SDK and pass it in:
+
+```go
+transport := &mcp.CommandTransport{
+    Command: exec.Command("my-mcp-server"),
+}
+
+mcpClient, err := sdk.CreateMCPClient(context.Background(), &sdk.MCPClientConfig{
+    Transport: transport,
+})
+```
+
+Twilight AI converts `mcp.Tool` definitions into `sdk.Tool` automatically:
+
+- `InputSchema` is converted into `*jsonschema.Schema`
+- tool execution calls `session.CallTool(...)` under the hood
+- MCP text content is returned as the tool output passed back into the model
+
 ### Embeddings
 
 Generate vector embeddings for text using OpenAI or Google:
@@ -255,7 +324,7 @@ if testResult.Supported {
 | [Getting Started](docs/getting-started.md) | Installation, setup, and first request |
 | [Providers](docs/providers.md) | Provider interface, OpenAI, Anthropic, and Google Gemini |
 | [Embeddings](docs/embeddings.md) | Generate vector embeddings with OpenAI and Google |
-| [Tool Calling](docs/tools.md) | Defining tools, multi-step execution, approval flow |
+| [Tool Calling](docs/tools.md) | Defining local tools, MCP tools, multi-step execution, approval flow |
 | [Streaming](docs/streaming.md) | Channel-based streaming and StreamPart types |
 | [API Reference](docs/api-reference.md) | Complete type and function reference |
 

@@ -78,6 +78,106 @@ weatherTool := sdk.Tool{
 | `Execute` | `ToolExecuteFunc` | Go function that runs when the LLM calls this tool |
 | `RequireApproval` | `bool` | If true, requires approval before execution |
 
+## Using MCP Tools
+
+Twilight AI can load remote tools from an MCP server and expose them as normal `sdk.Tool` values.
+
+This is useful when:
+
+- the tool already exists behind an MCP server
+- you want to share the same tool inventory across multiple apps
+- you want the model to call remote tools without writing a local `Execute` handler
+
+### Create an MCP client
+
+Use `CreateMCPClient` with HTTP, SSE, or a custom transport:
+
+```go
+import (
+    "context"
+
+    "github.com/memohai/twilight-ai/sdk"
+)
+
+mcpClient, err := sdk.CreateMCPClient(context.Background(), &sdk.MCPClientConfig{
+    Type: sdk.MCPTransportHTTP, // default; may be omitted
+    URL:  "https://example.com/mcp",
+    Headers: map[string]string{
+        "Authorization": "Bearer <token>",
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer mcpClient.Close()
+```
+
+### Supported transport patterns
+
+| Pattern | How to configure |
+|--------|------------------|
+| Streamable HTTP | `Type: sdk.MCPTransportHTTP`, `URL: "https://.../mcp"` |
+| SSE | `Type: sdk.MCPTransportSSE`, `URL: "https://.../sse"` |
+| Stdio / custom | Create `mcp.Transport` yourself and pass `Transport: ...` |
+
+For stdio, Twilight AI intentionally does not create the transport for you. Build it using the official MCP Go SDK:
+
+```go
+import (
+    "context"
+    "os/exec"
+
+    "github.com/memohai/twilight-ai/sdk"
+    "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+transport := &mcp.CommandTransport{
+    Command: exec.Command("my-mcp-server"),
+}
+
+mcpClient, err := sdk.CreateMCPClient(context.Background(), &sdk.MCPClientConfig{
+    Transport: transport,
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer mcpClient.Close()
+```
+
+### Convert MCP tools into Twilight tools
+
+```go
+tools, err := mcpClient.Tools(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+
+result, err := sdk.GenerateTextResult(ctx,
+    sdk.WithModel(model),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("Use the available MCP tools to answer this request."),
+    }),
+    sdk.WithTools(tools),
+    sdk.WithMaxSteps(5),
+)
+```
+
+### What gets converted automatically
+
+When you call `mcpClient.Tools(ctx)`, Twilight AI:
+
+1. calls `tools/list` on the MCP server
+2. converts each `mcp.Tool.InputSchema` into `*jsonschema.Schema`
+3. creates an `sdk.Tool.Execute` wrapper that calls `tools/call`
+4. returns MCP text content as the tool output seen by the model
+
+MCP tools behave like normal Twilight AI tools once loaded, so they work with:
+
+- `WithTools(...)`
+- `WithMaxSteps(...)`
+- `GenerateTextResult(...)`
+- `StreamText(...)`
+
 ### ToolExecContext
 
 The execution function receives a `*ToolExecContext` that embeds `context.Context` and provides additional metadata:

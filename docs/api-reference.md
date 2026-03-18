@@ -364,6 +364,43 @@ type ToolResult struct {
 }
 ```
 
+### MCP
+
+```go
+type MCPTransportType string
+
+const (
+    MCPTransportHTTP MCPTransportType = "http"
+    MCPTransportSSE  MCPTransportType = "sse"
+)
+
+type MCPClientConfig struct {
+    Type       MCPTransportType
+    URL        string
+    Headers    map[string]string
+    Transport  mcp.Transport
+    HTTPClient *http.Client
+    Name       string
+    Version    string
+}
+
+type MCPClient struct { /* unexported fields */ }
+
+func CreateMCPClient(ctx context.Context, config *MCPClientConfig) (*MCPClient, error)
+func (c *MCPClient) Tools(ctx context.Context) ([]Tool, error)
+func (c *MCPClient) Close() error
+```
+
+Behavior notes:
+
+- `CreateMCPClient` performs the MCP handshake and returns a ready-to-use client.
+- When `Transport` is non-nil, `Type`, `URL`, and `Headers` are ignored.
+- `MCPTransportHTTP` uses the official MCP Go SDK's streamable HTTP client transport.
+- `MCPTransportSSE` uses the official MCP Go SDK's SSE client transport.
+- For stdio, callers should create an MCP transport themselves, such as `mcp.CommandTransport`, and pass it via `Transport`.
+- `Tools(ctx)` converts remote `mcp.Tool` definitions into `sdk.Tool` values.
+- Converted tools use the MCP server's `InputSchema` as `Parameters` and call `tools/call` inside `Execute`.
+
 ---
 
 ### Streaming

@@ -69,7 +69,7 @@ func New(options ...Option) *Provider {
 func (p *Provider) Name() string { return "openai-codex" }
 
 func (p *Provider) ListModels(context.Context) ([]sdk.Model, error) {
-	models := codexModelCatalog()
+	models := Catalog()
 	out := make([]sdk.Model, 0, len(models))
 	for _, m := range models {
 		out = append(out, sdk.Model{
@@ -83,7 +83,7 @@ func (p *Provider) ListModels(context.Context) ([]sdk.Model, error) {
 }
 
 func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
-	_, err := p.TestModel(ctx, codexModelCatalog()[0].ID)
+	_, err := p.TestModel(ctx, Catalog()[0].ID)
 	if err != nil {
 		return classifyError(err)
 	}
@@ -639,20 +639,4 @@ func extractOpenAIEncryptedContent(meta map[string]any) string {
 	openai, _ := meta["openai"].(map[string]any)
 	encrypted, _ := openai["reasoningEncryptedContent"].(string)
 	return encrypted
-}
-
-type catalogModel struct {
-	ID          string
-	DisplayName string
-}
-
-func codexModelCatalog() []catalogModel {
-	return []catalogModel{
-		{ID: "gpt-5.2", DisplayName: "gpt-5.2"},
-		{ID: "gpt-5.2-codex", DisplayName: "gpt-5.2-codex"},
-		{ID: "gpt-5.1-codex-max", DisplayName: "gpt-5.1-codex-max"},
-		{ID: "gpt-5.1-codex", DisplayName: "gpt-5.1-codex"},
-		{ID: "gpt-5.1-codex-mini", DisplayName: "gpt-5.1-codex-mini"},
-		{ID: "gpt-5.1", DisplayName: "gpt-5.1"},
-	}
 }

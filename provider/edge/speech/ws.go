@@ -147,12 +147,6 @@ func (c *edgeWsClient) connect(ctx context.Context) error {
 	return nil
 }
 
-func (c *edgeWsClient) close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.resetLocked()
-}
-
 func (c *edgeWsClient) resetLocked() error {
 	conn := c.conn
 	c.conn = nil
@@ -195,14 +189,14 @@ func (c *edgeWsClient) configure(ctx context.Context, cfg audioConfig) error {
 	if cfg.Format != "" {
 		format = cfg.Format
 	}
-	body := fmt.Sprintf(`{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},"outputFormat":"%s"}}}}`, format)
+	body := fmt.Sprintf(`{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},"outputFormat":%q}}}}`, format)
 	extra := map[string]string{
 		"X-Timestamp": time.Now().String(),
 	}
 	return c.sendFrame("speech.config", "application/json; charset=utf-8", body, extra)
 }
 
-func buildSSML(text string, voice, lang string, speed, pitch float64) string {
+func buildSSML(text, voice, lang string, speed, pitch float64) string {
 	if voice == "" {
 		voice = DefaultVoice
 	}
@@ -289,11 +283,7 @@ func (c *edgeWsClient) synthesize(ctx context.Context, text string, cfg audioCon
 				return out, nil
 			}
 		case websocket.BinaryMessage:
-			audio, err := parseAudioChunk(data)
-			if err != nil {
-				return nil, err
-			}
-			if len(audio) > 0 {
+			if audio := parseAudioChunk(data); len(audio) > 0 {
 				out = append(out, audio...)
 			}
 		}
@@ -314,16 +304,16 @@ func parsePath(data []byte) string {
 }
 
 // parseAudioChunk parses an Edge binary audio frame: 2-byte big-endian header length + header + audio data.
-func parseAudioChunk(data []byte) ([]byte, error) {
+func parseAudioChunk(data []byte) []byte {
 	if len(data) < 2 {
-		return nil, nil
+		return nil
 	}
 	headerLen := binary.BigEndian.Uint16(data[:2])
 	audioStart := 2 + int(headerLen)
 	if audioStart > len(data) {
-		return nil, nil
+		return nil
 	}
-	return data[audioStart:], nil
+	return data[audioStart:]
 }
 
 // stream sends SSML and returns audio chunks via channel.
@@ -383,11 +373,7 @@ func (c *edgeWsClient) stream(ctx context.Context, text string, cfg audioConfig)
 					return
 				}
 			case websocket.BinaryMessage:
-				audio, err := parseAudioChunk(data)
-				if err != nil {
-					errCh <- err
-					return
-				}
+				audio := parseAudioChunk(data)
 				if len(audio) > 0 {
 					select {
 					case ch <- audio:

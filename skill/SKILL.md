@@ -27,6 +27,7 @@ Twilight AI is a lightweight Go AI SDK with a provider-agnostic core API.
 - Current providers:
   - `provider/openai/completions`
   - `provider/openai/responses`
+  - `provider/openai/codex`
   - `provider/anthropic/messages`
   - `provider/google/generativeai`
   - `provider/openai/embedding`
@@ -63,6 +64,7 @@ If the task introduces examples or docs, prefer simple end-to-end snippets that 
 
 - Use `openai/completions` for broad OpenAI-compatible support such as DeepSeek, Groq, Ollama, Azure-style compatible endpoints, and generic `/chat/completions` backends.
 - Use `openai/responses` when the task needs OpenAI Responses API features such as first-class reasoning models, reasoning summaries, URL citation annotations, or flat input mapping.
+- Use `openai/codex` when the task needs OpenAI Codex coding agent models (gpt-5.x-codex series) with ChatGPT access token authentication and encrypted reasoning content.
 - Use `anthropic/messages` for Claude and Anthropic extended thinking via `WithThinking`.
 - Use `google/generativeai` for Gemini chat, tool calling, vision, streaming, and Gemini reasoning.
 - Use `openai/embedding` or `google/embedding` for embeddings. Keep embedding-provider work separate from chat-provider work.
@@ -196,7 +198,7 @@ When writing Twilight AI docs or README content:
 - use Go examples, not pseudocode, unless explaining an interface contract
 - keep examples small and runnable in spirit
 - mention exact package paths for imports
-- explain when to choose Completions vs Responses when OpenAI is involved
+- explain when to choose Completions vs Responses vs Codex when OpenAI is involved
 - keep embeddings, tool calling, and streaming as separate concerns unless the example truly combines them
 
 ## Terminology

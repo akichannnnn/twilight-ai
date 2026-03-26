@@ -7,7 +7,10 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
-const defaultModelID = "edge-read-aloud"
+const (
+	defaultModelID   = "edge-read-aloud"
+	contentTypeAudio = "audio/mpeg"
+)
 
 // Option configures the Edge TTS provider.
 type Option func(*Provider)
@@ -126,7 +129,7 @@ func toFloat(v any) (float64, bool) {
 func resolveContentType(format string) string {
 	switch {
 	case strings.Contains(format, "mp3"):
-		return "audio/mpeg"
+		return contentTypeAudio
 	case strings.Contains(format, "opus"):
 		return "audio/opus"
 	case strings.Contains(format, "ogg"):
@@ -136,6 +139,6 @@ func resolveContentType(format string) string {
 	case strings.Contains(format, "wav"):
 		return "audio/wav"
 	default:
-		return "audio/mpeg"
+		return contentTypeAudio
 	}
 }

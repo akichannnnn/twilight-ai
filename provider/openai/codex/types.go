@@ -36,11 +36,6 @@ type codexReasoning struct {
 	Effort string `json:"effort,omitempty"`
 }
 
-type codexSystemMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 type codexUserContentPart struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
@@ -84,14 +79,6 @@ type codexReasoningItem struct {
 	Type             string                      `json:"type"`
 	Summary          []codexReasoningSummaryText `json:"summary"`
 	EncryptedContent string                      `json:"encrypted_content,omitempty"`
-}
-
-type codexModelsList struct {
-	Data []codexModelObject `json:"data"`
-}
-
-type codexModelObject struct {
-	ID string `json:"id"`
 }
 
 type codexCreatedChunk struct {

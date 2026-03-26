@@ -1042,3 +1042,100 @@ func (p *Provider) DoStream(ctx, params) (*sdk.StreamResult, error)
 | `response.output_item.done` (function_call) | `ToolInputEndPart` |
 | `response.output_text.annotation.added` (url_citation) | `StreamSourcePart` |
 | `response.completed` / `response.incomplete` | `FinishStepPart` + `FinishPart` |
+
+---
+
+## Package `provider/openai/codex`
+
+### Provider
+
+```go
+type Provider struct { /* unexported */ }
+
+func New(options ...Option) *Provider
+```
+
+Implements `sdk.Provider`. Uses the OpenAI Codex backend API (`/codex/responses`) with SSE streaming. Targets Codex-specific models (gpt-5.x-codex series) with encrypted reasoning content support.
+
+### Model Catalog
+
+```go
+type ModelDescriptor struct {
+    ID                string
+    DisplayName       string
+    SupportsToolCall  bool
+    SupportsReasoning bool
+    ReasoningEfforts  []string
+}
+
+func Catalog() []ModelDescriptor
+```
+
+Returns the static model catalog. `ListModels` delegates to `Catalog()` (no HTTP call).
+
+#### Options
+
+```go
+type Option func(*Provider)
+
+func WithAccessToken(token string) Option
+func WithAPIKey(token string) Option          // alias for WithAccessToken
+func WithAccountID(accountID string) Option
+func WithOriginator(originator string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
+```
+
+| Option | Default |
+|--------|---------|
+| `WithBaseURL` | `https://chatgpt.com/backend-api` |
+| `WithOriginator` | `"codex_cli_rs"` |
+| `WithHTTPClient` | `&http.Client{}` |
+| `WithAccountID` | Auto-extracted from JWT |
+
+#### Methods
+
+```go
+func (p *Provider) Name() string                  // "openai-codex"
+func (p *Provider) ChatModel(id string) *sdk.Model
+func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error)
+func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult
+func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error)
+func (p *Provider) DoGenerate(ctx, params) (*sdk.GenerateResult, error)
+func (p *Provider) DoStream(ctx, params) (*sdk.StreamResult, error)
+```
+
+| Method | API Endpoint |
+|--------|-------------|
+| `ListModels` | Static catalog (no HTTP) |
+| `Test` / `TestModel` | `POST /codex/responses` (probe) |
+
+#### Codex-Specific Behavior
+
+**Input Conversion**: The provider converts `sdk.Message` types into the Codex flat input format:
+
+| SDK Message | Codex Input |
+|-------------|-------------|
+| System message / `System` param | `instructions` field (joined with `\n\n`) |
+| User message (text) | `{type: "input_text"}` in user content |
+| User message (image) | `{type: "input_image"}` in user content |
+| Assistant message (text) | `{type: "output_text"}` in assistant content |
+| Assistant reasoning | `{type: "reasoning", summary: [...], encrypted_content: "..."}` |
+| Tool call | `{type: "function_call", call_id, name, arguments}` |
+| Tool result | `{type: "function_call_output", call_id, output}` |
+
+**Streaming Events**: Codex SSE events map to SDK `StreamPart` types:
+
+| SSE Event | SDK StreamPart |
+|-----------|---------------|
+| `response.created` | Captures response ID, model, timestamp |
+| `response.output_item.added` (message) | `TextStartPart` |
+| `response.output_item.added` (reasoning) | `ReasoningStartPart` (with encrypted content metadata) |
+| `response.output_item.added` (function_call) | `ToolInputStartPart` |
+| `response.output_text.delta` | `TextDeltaPart` |
+| `response.reasoning_summary_text.delta` | `ReasoningDeltaPart` |
+| `response.function_call_arguments.delta` | `ToolInputDeltaPart` |
+| `response.output_item.done` (function_call) | `ToolInputEndPart` + `StreamToolCallPart` |
+| `response.completed` / `response.incomplete` | `FinishStepPart` + `FinishPart` |
+
+**Encrypted Reasoning**: When the model returns reasoning with encrypted content, it is preserved in `ReasoningStartPart.ProviderMetadata["openai"]["reasoningEncryptedContent"]` and round-tripped back via `ReasoningPart.ProviderMetadata` in follow-up turns.

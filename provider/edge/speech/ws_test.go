@@ -161,10 +161,7 @@ func TestParseAudioChunk(t *testing.T) {
 	copy(buf[2:], header)
 	copy(buf[2+len(header):], audio)
 
-	got, err := parseAudioChunk(buf)
-	if err != nil {
-		t.Fatalf("parseAudioChunk: %v", err)
-	}
+	got := parseAudioChunk(buf)
 	if !bytes.Equal(got, audio) {
 		t.Errorf("got %q, want %q", got, audio)
 	}
@@ -172,17 +169,11 @@ func TestParseAudioChunk(t *testing.T) {
 
 func TestParseAudioChunk_EmptyOrShort(t *testing.T) {
 	t.Parallel()
-	got, err := parseAudioChunk(nil)
-	if err != nil {
-		t.Errorf("nil: want nil err, got %v", err)
-	}
+	got := parseAudioChunk(nil)
 	if len(got) != 0 {
 		t.Errorf("nil: got %d bytes", len(got))
 	}
-	got, err = parseAudioChunk([]byte{0x00, 0x00})
-	if err != nil {
-		t.Fatalf("short: %v", err)
-	}
+	got = parseAudioChunk([]byte{0x00, 0x00})
 	if len(got) != 0 {
 		t.Errorf("short: got %d bytes", len(got))
 	}

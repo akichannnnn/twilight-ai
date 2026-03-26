@@ -91,14 +91,11 @@ func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
 }
 
 func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error) {
-	req, err := p.buildRequest(&sdk.GenerateParams{
+	req := p.buildRequest(&sdk.GenerateParams{
 		Model:    p.ChatModel(modelID),
 		System:   "You are a helpful AI assistant.",
 		Messages: []sdk.Message{sdk.UserMessage("ping")},
 	})
-	if err != nil {
-		return nil, err
-	}
 	req.Stream = false
 
 	status, err := utils.ProbeStatus(ctx, p.httpClient, &utils.RequestOptions{
@@ -122,7 +119,7 @@ func (p *Provider) ChatModel(id string) *sdk.Model {
 	}
 }
 
-func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) { //nolint:gocritic // interface method
 	sr, err := p.DoStream(ctx, params)
 	if err != nil {
 		return nil, err
@@ -139,10 +136,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 		return nil, fmt.Errorf("openai-codex: model is required")
 	}
 
-	req, err := p.buildRequest(&params)
-	if err != nil {
-		return nil, err
-	}
+	req := p.buildRequest(&params)
 	req.Stream = true
 
 	ch := make(chan sdk.StreamPart, 64)
@@ -365,7 +359,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 	return &sdk.StreamResult{Stream: ch}, nil
 }
 
-func (p *Provider) buildRequest(params *sdk.GenerateParams) (*codexRequest, error) {
+func (p *Provider) buildRequest(params *sdk.GenerateParams) *codexRequest {
 	instructions, input := convertToCodexInput(params)
 	req := &codexRequest{
 		Model:        params.Model.ID,
@@ -396,7 +390,7 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) (*codexRequest, erro
 	if params.ReasoningEffort != nil && *params.ReasoningEffort != "" {
 		req.Reasoning = &codexReasoning{Effort: *params.ReasoningEffort}
 	}
-	return req, nil
+	return req
 }
 
 func convertCodexTools(tools []sdk.Tool) []codexTool {
@@ -618,7 +612,7 @@ func joinNonEmpty(values ...string) string {
 	if len(out) == 0 {
 		return "You are a helpful AI assistant."
 	}
-	return fmt.Sprintf("%s", joinWithDoubleNewline(out))
+	return joinWithDoubleNewline(out)
 }
 
 func joinWithDoubleNewline(values []string) string {

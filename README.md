@@ -373,6 +373,7 @@ if testResult.Supported {
 |----------|-------------|-----|--------|
 | OpenAI Chat Completions | `completions.New()` | `/chat/completions` | ✅ Stable |
 | OpenAI Responses | `responses.New()` | `/responses` | ✅ Stable |
+| OpenAI Codex | `codex.New()` | `/codex/responses` | ✅ Stable |
 | OpenAI-compatible (DeepSeek, Groq, etc.) | `completions.New()` + `WithBaseURL` | `/chat/completions` | ✅ Stable |
 | OpenRouter Responses | `responses.New()` + `WithBaseURL` | `/responses` | ✅ Stable |
 | Anthropic | `messages.New()` | `/messages` | ✅ Stable |

@@ -11,6 +11,7 @@ Use it when the task needs exact package names, exported types, function signatu
 - `github.com/memohai/twilight-ai/provider/openai/responses`
 - `github.com/memohai/twilight-ai/provider/anthropic/messages`
 - `github.com/memohai/twilight-ai/provider/google/generativeai`
+- `github.com/memohai/twilight-ai/provider/openai/codex`
 - `github.com/memohai/twilight-ai/provider/openai/embedding`
 - `github.com/memohai/twilight-ai/provider/google/embedding`
 
@@ -668,6 +669,64 @@ Responses-specific behavior:
 - URL citation annotations map to `GenerateResult.Sources`
 - function-call outputs map to tool-call and tool-result structures
 
+## Package `provider/openai/codex`
+
+Implements the OpenAI Codex backend API for coding agent models. Communicates with the ChatGPT backend at `/codex/responses` using SSE streaming with Responses-style events.
+
+```go
+type ModelDescriptor struct {
+    ID                string
+    DisplayName       string
+    SupportsToolCall  bool
+    SupportsReasoning bool
+    ReasoningEfforts  []string
+}
+
+func Catalog() []ModelDescriptor
+
+type Provider struct { /* unexported fields */ }
+
+type Option func(*Provider)
+
+func WithAccessToken(token string) Option
+func WithAPIKey(token string) Option        // alias for WithAccessToken
+func WithAccountID(accountID string) Option
+func WithOriginator(originator string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
+func New(options ...Option) *Provider
+
+func (p *Provider) Name() string
+func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error)
+func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult
+func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error)
+func (p *Provider) ChatModel(id string) *sdk.Model
+func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error)
+func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error)
+```
+
+Default option values:
+
+- `WithBaseURL`: `https://chatgpt.com/backend-api`
+- `WithOriginator`: `"codex_cli_rs"`
+- `WithHTTPClient`: `&http.Client{}`
+- `WithAccountID`: auto-extracted from the access token JWT if omitted
+
+Authentication headers:
+
+- `Authorization: Bearer <access_token>`
+- `OpenAI-Beta: responses=experimental`
+- `originator: <originator>`
+- `chatgpt-account-id: <account_id>` (when available)
+
+Codex-specific behavior:
+
+- `ListModels` returns a static catalog (no HTTP call)
+- `TestModel` probes `POST /codex/responses` with a minimal request
+- Messages are converted to the flat Codex input format (instructions + input items)
+- Reasoning uses encrypted content: `ProviderMetadata["openai"]["reasoningEncryptedContent"]`
+- Supports `ReasoningEffort` via the `reasoning.effort` request field
+
 ## Package `provider/anthropic/messages`
 
 Implements the Anthropic Messages API.
@@ -828,6 +887,7 @@ Behavior notes:
 
 - Broad OpenAI-compatible chat API: `provider/openai/completions`
 - OpenAI Responses features such as reasoning summaries or citation annotations: `provider/openai/responses`
+- OpenAI Codex coding agents with encrypted reasoning: `provider/openai/codex`
 - Claude and extended thinking: `provider/anthropic/messages`
 - Gemini chat and tool calling: `provider/google/generativeai`
 - OpenAI-compatible embeddings: `provider/openai/embedding`

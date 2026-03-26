@@ -255,6 +255,111 @@ In streaming mode, reasoning arrives as `ReasoningStartPart` / `ReasoningDeltaPa
 | Cached / reasoning token details | ✅ |
 | ListModels / Test / TestModel | ✅ |
 
+## OpenAI Codex Provider
+
+The `provider/openai/codex` package provides an implementation for the [OpenAI Codex](https://openai.com/index/introducing-codex/) backend — a cloud-based coding agent powered by reasoning models. It communicates with the ChatGPT backend API via the Responses-style event stream at `/codex/responses`.
+
+### When to Use Codex vs Completions / Responses
+
+| | Chat Completions | Responses | Codex |
+|--|---|---|---|
+| **Endpoint** | `/chat/completions` | `/responses` | `/codex/responses` (ChatGPT backend) |
+| **Authentication** | API key | API key | ChatGPT access token + account ID |
+| **Reasoning models** | Basic | First-class | Native (encrypted reasoning content) |
+| **Target use-case** | General chat | General + reasoning | Coding agents |
+| **Compatibility** | Broad | OpenAI / OpenRouter | OpenAI Codex only |
+
+Use **Codex** when you have a ChatGPT access token and want to leverage Codex-specific models (gpt-5.x-codex series) with encrypted reasoning support.
+
+### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/codex"
+
+provider := codex.New(
+    codex.WithAccessToken("eyJhbGci..."),
+    codex.WithAccountID("acct_123"),
+)
+model := provider.ChatModel("gpt-5.2-codex")
+```
+
+The account ID is optional — if omitted, the provider extracts it from the JWT access token's `https://api.openai.com/auth` claim automatically.
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAccessToken(token)` | `""` | ChatGPT access token (JWT) sent as `Authorization: Bearer <token>` |
+| `WithAPIKey(token)` | `""` | Alias for `WithAccessToken` for migration convenience |
+| `WithAccountID(id)` | Auto-extracted from token | ChatGPT account ID sent as `chatgpt-account-id` header |
+| `WithOriginator(name)` | `"codex_cli_rs"` | Originator identifier sent in the `originator` header |
+| `WithBaseURL(url)` | `https://chatgpt.com/backend-api` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+### Available Models
+
+The provider includes a static model catalog accessible via `codex.Catalog()`:
+
+| Model | Reasoning Efforts |
+|-------|-------------------|
+| `gpt-5.2` | none, low, medium, high, xhigh |
+| `gpt-5.2-codex` | low, medium, high, xhigh |
+| `gpt-5.1-codex-max` | low, medium, high, xhigh |
+| `gpt-5.1-codex` | low, medium, high |
+| `gpt-5.1-codex-mini` | medium, high |
+| `gpt-5.1` | none, low, medium, high |
+
+### Reasoning
+
+Codex models support reasoning with encrypted content preservation. When the model returns reasoning, the encrypted content is passed through via `ProviderMetadata` so it can be sent back in follow-up turns:
+
+```go
+effort := "high"
+result, _ := sdk.GenerateTextResult(ctx,
+    sdk.WithModel(provider.ChatModel("gpt-5.2-codex")),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("Refactor this function to use generics."),
+    }),
+    sdk.WithReasoningEffort(&effort),
+)
+fmt.Println(result.Reasoning) // reasoning summary
+fmt.Println(result.Text)      // final answer
+```
+
+In streaming mode, reasoning arrives as `ReasoningStartPart` / `ReasoningDeltaPart` / `ReasoningEndPart` with encrypted content in `ProviderMetadata["openai"]["reasoningEncryptedContent"]`.
+
+### Message Mapping
+
+The Codex API uses a flat input format (similar to Responses). The provider converts SDK messages automatically:
+
+| SDK Message | Codex Input |
+|-------------|-------------|
+| System message / `System` param | `instructions` field (joined with `\n\n`) |
+| User message (text) | `{role: "user", content: [{type: "input_text", ...}]}` |
+| User message (image) | `{role: "user", content: [{type: "input_image", ...}]}` |
+| Assistant message (text) | `{role: "assistant", content: [{type: "output_text", ...}]}` |
+| Assistant reasoning | `{type: "reasoning", summary: [...], encrypted_content: "..."}` |
+| Tool call | `{type: "function_call", call_id, name, arguments}` |
+| Tool result | `{type: "function_call_output", call_id, output}` |
+
+### Supported Features
+
+| Feature | Supported |
+|---------|-----------|
+| Text generation | ✅ |
+| Streaming (SSE) | ✅ |
+| Tool/function calling | ✅ |
+| Vision (image inputs) | ✅ |
+| Reasoning (encrypted content) | ✅ |
+| Reasoning effort control | ✅ |
+| JSON mode / JSON Schema | ✅ |
+| Token usage reporting | ✅ |
+| Cached / reasoning token details | ✅ |
+| ListModels (static catalog) | ✅ |
+| Test / TestModel | ✅ |
+
+---
+
 ## Anthropic Provider
 
 The `provider/anthropic/messages` package implements the [Anthropic Messages API](https://docs.anthropic.com/en/api/messages) for Claude models.

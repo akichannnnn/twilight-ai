@@ -1170,6 +1170,234 @@ func TestTestModel_NotSupported(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_ImagePartDataURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Content []struct {
+					Type   string `json:"type"`
+					Source *struct {
+						Type      string `json:"type"`
+						MediaType string `json:"media_type"`
+						Data      string `json:"data"`
+					} `json:"source,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(body.Messages) == 0 || len(body.Messages[0].Content) < 2 {
+			t.Fatalf("expected at least 2 content blocks, got %d", len(body.Messages[0].Content))
+		}
+
+		img := body.Messages[0].Content[0]
+		if img.Type != "image" {
+			t.Errorf("expected type 'image', got %q", img.Type)
+		}
+		if img.Source == nil {
+			t.Fatal("expected source to be non-nil")
+		}
+		if img.Source.Type != "base64" {
+			t.Errorf("expected source type 'base64', got %q", img.Source.Type)
+		}
+		if img.Source.MediaType != "image/png" {
+			t.Errorf("expected media_type 'image/png', got %q", img.Source.MediaType)
+		}
+		if img.Source.Data != "AAAA" {
+			t.Errorf("expected data 'AAAA', got %q", img.Source.Data)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_img", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "I see an image."}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 100, "output_tokens": 5},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{
+				sdk.ImagePart{Image: "data:image/png;base64,AAAA", MediaType: "image/png"},
+				sdk.TextPart{Text: "What is this?"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+}
+
+func TestDoGenerate_ImagePartUnsupportedMediaType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Content []struct {
+					Type   string `json:"type"`
+					Source *struct {
+						Type      string `json:"type"`
+						MediaType string `json:"media_type"`
+						Data      string `json:"data"`
+					} `json:"source,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		img := body.Messages[0].Content[0]
+		if img.Source == nil {
+			t.Fatal("expected source to be non-nil")
+		}
+		supported := map[string]bool{
+			"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true,
+		}
+		if !supported[img.Source.MediaType] {
+			t.Errorf("expected Anthropic-supported media_type, got %q", img.Source.MediaType)
+		}
+		if img.Source.Data != "BBBB" {
+			t.Errorf("expected raw base64 'BBBB', got %q", img.Source.Data)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_img2", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 100, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{
+				sdk.ImagePart{Image: "data:image/bmp;base64,BBBB", MediaType: "image/bmp"},
+				sdk.TextPart{Text: "Describe this"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+}
+
+func TestDoGenerate_ImagePartEmptyMediaType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Content []struct {
+					Type   string `json:"type"`
+					Source *struct {
+						Type      string `json:"type"`
+						MediaType string `json:"media_type"`
+						Data      string `json:"data"`
+					} `json:"source,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		img := body.Messages[0].Content[0]
+		if img.Source == nil {
+			t.Fatal("expected source to be non-nil")
+		}
+		if img.Source.MediaType != "image/jpeg" {
+			t.Errorf("expected media_type extracted from data URL 'image/jpeg', got %q", img.Source.MediaType)
+		}
+		if img.Source.Data != "CCCC" {
+			t.Errorf("expected raw base64 'CCCC', got %q", img.Source.Data)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_img3", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 100, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{
+				sdk.ImagePart{Image: "data:image/jpeg;base64,CCCC", MediaType: ""},
+				sdk.TextPart{Text: "Describe this"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+}
+
+func TestDoGenerate_ImagePartPublicURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Content []struct {
+					Type   string `json:"type"`
+					Source *struct {
+						Type string `json:"type"`
+						URL  string `json:"url"`
+					} `json:"source,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		img := body.Messages[0].Content[0]
+		if img.Source == nil {
+			t.Fatal("expected source to be non-nil")
+		}
+		if img.Source.Type != "url" {
+			t.Errorf("expected source type 'url', got %q", img.Source.Type)
+		}
+		if img.Source.URL != "https://example.com/photo.jpg" {
+			t.Errorf("expected URL 'https://example.com/photo.jpg', got %q", img.Source.URL)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_img4", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 100, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{
+				sdk.ImagePart{Image: "https://example.com/photo.jpg", MediaType: "image/jpeg"},
+				sdk.TextPart{Text: "Describe this"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+}
+
 func TestMain(m *testing.M) {
 	testutil.LoadEnv()
 	os.Exit(m.Run())

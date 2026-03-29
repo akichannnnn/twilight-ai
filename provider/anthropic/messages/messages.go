@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/memohai/twilight-ai/internal/utils"
 	"github.com/memohai/twilight-ai/sdk"
@@ -359,19 +360,69 @@ func convertUserContent(parts []sdk.MessagePart) []contentBlock {
 		case sdk.TextPart:
 			blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Text})
 		case sdk.ImagePart:
-			blocks = append(blocks, contentBlock{
-				Type: "image",
-				Source: &imageSource{
-					Type:      "base64",
-					MediaType: p.MediaType,
-					Data:      p.Image,
-				},
-			})
+			blocks = append(blocks, convertImagePart(p))
 		case sdk.FilePart:
 			blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Data})
 		}
 	}
 	return blocks
+}
+
+// convertImagePart converts an sdk.ImagePart into an Anthropic content block,
+// handling both data URLs and public URLs as image sources. For data URLs the
+// prefix is stripped and the embedded MIME type is used when the caller did not
+// provide one. For public URLs the "url" source type is used instead.
+func convertImagePart(p sdk.ImagePart) contentBlock {
+	image := strings.TrimSpace(p.Image)
+	mediaType := strings.TrimSpace(p.MediaType)
+
+	if strings.HasPrefix(strings.ToLower(image), "http://") || strings.HasPrefix(strings.ToLower(image), "https://") {
+		return contentBlock{
+			Type: "image",
+			Source: &imageSource{
+				Type:      "url",
+				MediaType: mediaType,
+				URL:       image,
+			},
+		}
+	}
+
+	if lower := strings.ToLower(image); strings.HasPrefix(lower, "data:") {
+		if idx := strings.Index(image, ","); idx >= 0 {
+			header := image[len("data:"):idx]
+			image = image[idx+1:]
+
+			if mediaType == "" || !isAnthropicSupportedMediaType(mediaType) {
+				if semi := strings.Index(header, ";"); semi >= 0 {
+					mediaType = strings.TrimSpace(header[:semi])
+				} else {
+					mediaType = strings.TrimSpace(header)
+				}
+			}
+		}
+	}
+
+	if !isAnthropicSupportedMediaType(mediaType) {
+		mediaType = "image/png"
+	}
+
+	return contentBlock{
+		Type: "image",
+		Source: &imageSource{
+			Type:      "base64",
+			MediaType: mediaType,
+			Data:      image,
+		},
+	}
+}
+
+func isAnthropicSupportedMediaType(mt string) bool {
+	switch strings.ToLower(strings.TrimSpace(mt)) {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
 }
 
 func convertAssistantMessage(msg sdk.Message) anthropicMessage {

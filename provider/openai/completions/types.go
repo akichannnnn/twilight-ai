@@ -81,12 +81,13 @@ type chatChoice struct {
 }
 
 type chatRespMessage struct {
-	Role             string         `json:"role"`
-	Content          string         `json:"content"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
-	Reasoning        string         `json:"reasoning,omitempty"`
-	Refusal          string         `json:"refusal,omitempty"`
-	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	Role             string           `json:"role"`
+	Content          string           `json:"content"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	Reasoning        string           `json:"reasoning,omitempty"`
+	Refusal          string           `json:"refusal,omitempty"`
+	ToolCalls        []chatToolCall   `json:"tool_calls,omitempty"`
+	Images           []chatImagePart  `json:"images,omitempty"`
 }
 
 type chatToolCall struct {
@@ -141,6 +142,12 @@ type chatChunkDelta struct {
 	Reasoning        string              `json:"reasoning,omitempty"`
 	Refusal          string              `json:"refusal,omitempty"`
 	ToolCalls        []chatToolCallChunk `json:"tool_calls,omitempty"`
+	Images           []chatImagePart     `json:"images,omitempty"`
+}
+
+type chatImagePart struct {
+	Type     string       `json:"type"`
+	ImageURL chatImageURL `json:"image_url"`
 }
 
 type chatToolCallChunk struct {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
@@ -357,6 +358,28 @@ func (p *Provider) parseResponse(resp *chatResponse) (*sdk.GenerateResult, error
 				Input:      input,
 			})
 		}
+
+		for _, img := range choice.Message.Images {
+			url := img.ImageURL.URL
+			if url == "" {
+				continue
+			}
+			mediaType := "image/png"
+			if strings.HasPrefix(url, "data:") {
+				rest := url[len("data:"):]
+				if semi := strings.Index(rest, ";"); semi > 0 {
+					mediaType = rest[:semi]
+				}
+			}
+			data := url
+			if ci := strings.Index(url, ","); ci >= 0 {
+				data = url[ci+1:]
+			}
+			result.Files = append(result.Files, sdk.GeneratedFile{
+				Data:      data,
+				MediaType: mediaType,
+			})
+		}
 	}
 
 	return result, nil
@@ -538,6 +561,38 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 						stc.finished = true
 					}
 				}
+			}
+
+			for _, img := range choice.Delta.Images {
+				url := img.ImageURL.URL
+				if url == "" {
+					continue
+				}
+				if textStartSent {
+					send(&sdk.TextEndPart{ID: chunk.ID})
+					textStartSent = false
+				}
+				if reasoningStartSent {
+					send(&sdk.ReasoningEndPart{ID: chunk.ID})
+					reasoningStartSent = false
+				}
+				mediaType := "image/png"
+				if strings.HasPrefix(url, "data:") {
+					rest := url[len("data:"):]
+					if semi := strings.Index(rest, ";"); semi > 0 {
+						mediaType = rest[:semi]
+					}
+				}
+				data := url
+				if ci := strings.Index(url, ","); ci >= 0 {
+					data = url[ci+1:]
+				}
+				send(&sdk.StreamFilePart{
+					File: sdk.GeneratedFile{
+						Data:      data,
+						MediaType: mediaType,
+					},
+				})
 			}
 
 			if choice.FinishReason != nil && *choice.FinishReason != "" {

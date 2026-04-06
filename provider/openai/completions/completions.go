@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
@@ -364,17 +363,7 @@ func (p *Provider) parseResponse(resp *chatResponse) (*sdk.GenerateResult, error
 			if url == "" {
 				continue
 			}
-			mediaType := "image/png"
-			if strings.HasPrefix(url, "data:") {
-				rest := url[len("data:"):]
-				if semi := strings.Index(rest, ";"); semi > 0 {
-					mediaType = rest[:semi]
-				}
-			}
-			data := url
-			if ci := strings.Index(url, ","); ci >= 0 {
-				data = url[ci+1:]
-			}
+			mediaType, data := parseDataURL(url)
 			result.Files = append(result.Files, sdk.GeneratedFile{
 				Data:      data,
 				MediaType: mediaType,
@@ -401,63 +390,16 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 	go func() {
 		defer close(ch)
 
-		var (
-			textStartSent      bool
-			reasoningStartSent bool
-			rawFinishReason    string
-			finishReason       sdk.FinishReason
-			usage              sdk.Usage
-			chunkID            string
-			chunkModel         string
-			chunkCreated       int64
-			flushed            bool
-			pendingToolCalls   = map[int]*streamingToolCall{}
-		)
-
-		send := func(part sdk.StreamPart) bool {
-			select {
-			case ch <- part:
-				return true
-			case <-ctx.Done():
-				return false
-			}
+		sp := &streamProcessor{
+			ctx:              ctx,
+			ch:               ch,
+			pendingToolCalls: map[int]*streamingToolCall{},
 		}
 
-		flush := func() {
-			if flushed {
-				return
-			}
-			flushed = true
-			if reasoningStartSent {
-				send(&sdk.ReasoningEndPart{ID: chunkID})
-				reasoningStartSent = false
-			}
-			if textStartSent {
-				send(&sdk.TextEndPart{ID: chunkID})
-				textStartSent = false
-			}
-			for _, stc := range pendingToolCalls {
-				if stc.finished {
-					continue
-				}
-				send(&sdk.ToolInputEndPart{ID: stc.id})
-				var input any
-				if err := json.Unmarshal([]byte(stc.args), &input); err != nil {
-					send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal tool call arguments for %q: %w", stc.name, err)})
-				}
-				send(&sdk.StreamToolCallPart{
-					ToolCallID: stc.id,
-					ToolName:   stc.name,
-					Input:      input,
-				})
-				stc.finished = true
-			}
-		}
-
-		if !send(&sdk.StartPart{}) {
+		if !sp.send(&sdk.StartPart{}) {
 			return
 		}
-		if !send(&sdk.StartStepPart{}) {
+		if !sp.send(&sdk.StartStepPart{}) {
 			return
 		}
 
@@ -474,163 +416,28 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 
 			var chunk chatChunkResponse
 			if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
-				send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal chunk: %w", err)})
+				sp.send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal chunk: %w", err)})
 				return err
 			}
 
-			if chunkID == "" {
-				chunkID = chunk.ID
-				chunkModel = chunk.Model
-				chunkCreated = chunk.Created
-			}
-
-			if chunk.Usage != nil {
-				usage = convertUsage(chunk.Usage)
-			}
-
-			if len(chunk.Choices) == 0 {
-				return nil
-			}
-			choice := chunk.Choices[0]
-
-			reasoningContent := reasoningFromDelta(&choice.Delta)
-			if reasoningContent != "" {
-				if !reasoningStartSent {
-					send(&sdk.ReasoningStartPart{ID: chunk.ID})
-					reasoningStartSent = true
-				}
-				send(&sdk.ReasoningDeltaPart{ID: chunk.ID, Text: reasoningContent})
-			}
-
-			if choice.Delta.Content != "" {
-				if reasoningStartSent {
-					send(&sdk.ReasoningEndPart{ID: chunk.ID})
-					reasoningStartSent = false
-				}
-				if !textStartSent {
-					send(&sdk.TextStartPart{ID: chunk.ID})
-					textStartSent = true
-				}
-				send(&sdk.TextDeltaPart{ID: chunk.ID, Text: choice.Delta.Content})
-			}
-
-			if len(choice.Delta.ToolCalls) > 0 {
-				if reasoningStartSent {
-					send(&sdk.ReasoningEndPart{ID: chunk.ID})
-					reasoningStartSent = false
-				}
-				if textStartSent {
-					send(&sdk.TextEndPart{ID: chunk.ID})
-					textStartSent = false
-				}
-			}
-
-			for _, tc := range choice.Delta.ToolCalls {
-				idx := tc.Index
-				stc, exists := pendingToolCalls[idx]
-				if !exists {
-					id := tc.ID
-					if id == "" {
-						id = generateID()
-					}
-					stc = &streamingToolCall{id: id, name: tc.Function.Name}
-					pendingToolCalls[idx] = stc
-					send(&sdk.ToolInputStartPart{
-						ID:       stc.id,
-						ToolName: stc.name,
-					})
-				}
-				if tc.Function.Arguments != "" {
-					stc.args += tc.Function.Arguments
-					send(&sdk.ToolInputDeltaPart{
-						ID:    stc.id,
-						Delta: tc.Function.Arguments,
-					})
-
-					if !stc.finished && json.Valid([]byte(stc.args)) {
-						send(&sdk.ToolInputEndPart{ID: stc.id})
-						var input any
-						if err := json.Unmarshal([]byte(stc.args), &input); err != nil {
-							send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal tool call arguments for %q: %w", stc.name, err)})
-						}
-						send(&sdk.StreamToolCallPart{
-							ToolCallID: stc.id,
-							ToolName:   stc.name,
-							Input:      input,
-						})
-						stc.finished = true
-					}
-				}
-			}
-
-			for _, img := range choice.Delta.Images {
-				url := img.ImageURL.URL
-				if url == "" {
-					continue
-				}
-				if textStartSent {
-					send(&sdk.TextEndPart{ID: chunk.ID})
-					textStartSent = false
-				}
-				if reasoningStartSent {
-					send(&sdk.ReasoningEndPart{ID: chunk.ID})
-					reasoningStartSent = false
-				}
-				mediaType := "image/png"
-				if strings.HasPrefix(url, "data:") {
-					rest := url[len("data:"):]
-					if semi := strings.Index(rest, ";"); semi > 0 {
-						mediaType = rest[:semi]
-					}
-				}
-				data := url
-				if ci := strings.Index(url, ","); ci >= 0 {
-					data = url[ci+1:]
-				}
-				send(&sdk.StreamFilePart{
-					File: sdk.GeneratedFile{
-						Data:      data,
-						MediaType: mediaType,
-					},
-				})
-			}
-
-			if choice.FinishReason != nil && *choice.FinishReason != "" {
-				rawFinishReason = *choice.FinishReason
-				finishReason = mapFinishReason(rawFinishReason)
-
-				flush()
-
-				send(&sdk.FinishStepPart{
-					FinishReason:    finishReason,
-					RawFinishReason: rawFinishReason,
-					Usage:           usage,
-					Response: sdk.ResponseMetadata{
-						ID:        chunkID,
-						ModelID:   chunkModel,
-						Timestamp: time.Unix(chunkCreated, 0),
-					},
-				})
-			}
-
-			return nil
+			return sp.processChunk(&chunk)
 		})
 
 		if err != nil {
 			var apiErr *utils.APIError
 			if errors.As(err, &apiErr) {
-				send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %s", apiErr.Detail())})
+				sp.send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %s", apiErr.Detail())})
 			} else {
-				send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %w", err)})
+				sp.send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %w", err)})
 			}
 		}
 
-		flush()
+		sp.flush()
 
-		send(&sdk.FinishPart{
-			FinishReason:    finishReason,
-			RawFinishReason: rawFinishReason,
-			TotalUsage:      usage,
+		sp.send(&sdk.FinishPart{
+			FinishReason:    sp.finishReason,
+			RawFinishReason: sp.rawFinishReason,
+			TotalUsage:      sp.usage,
 		})
 	}()
 

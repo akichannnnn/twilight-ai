@@ -11,8 +11,8 @@ Use this skill when the task involves `twilight-ai`, especially:
 
 - implementing or refactoring SDK APIs in `sdk/`
 - adding or updating providers under `provider/`
-- working on `GenerateText`, `GenerateTextResult`, `StreamText`, `Embed`, or `EmbedMany`
-- adding tool-calling, streaming, reasoning, or embedding support
+- working on `GenerateText`, `GenerateTextResult`, `StreamText`, `Embed`, `EmbedMany`, `GenerateImage`, or `EditImage`
+- adding tool-calling, streaming, reasoning, embedding, or image generation support
 - writing examples, docs, or usage guidance for this library
 
 ## Project Snapshot
@@ -20,6 +20,7 @@ Use this skill when the task involves `twilight-ai`, especially:
 Twilight AI is a lightweight Go AI SDK with a provider-agnostic core API.
 
 - Text generation: `sdk.GenerateText`, `sdk.GenerateTextResult`, `sdk.StreamText`
+- Image generation: `sdk.GenerateImage`, `sdk.EditImage`
 - Embeddings: `sdk.Embed`, `sdk.EmbedMany`
 - Tool calling: `sdk.Tool`, `sdk.NewTool[T]`, `WithMaxSteps`, approval flow
 - MCP tool integration: `sdk.CreateMCPClient`, `sdk.MCPClient`, `sdk.MCPClientConfig`
@@ -28,6 +29,7 @@ Twilight AI is a lightweight Go AI SDK with a provider-agnostic core API.
   - `provider/openai/completions`
   - `provider/openai/responses`
   - `provider/openai/codex`
+  - `provider/openai/images`
   - `provider/anthropic/messages`
   - `provider/google/generativeai`
   - `provider/openai/embedding`
@@ -39,6 +41,8 @@ Prefer the high-level SDK API first, then drop to provider details only when nee
 
 - `sdk.Model` binds a chat model to a `sdk.Provider`
 - `sdk.EmbeddingModel` binds an embedding model to an `sdk.EmbeddingProvider`
+- `sdk.ImageGenerationModel` binds an image generation model to an `sdk.ImageGenerationProvider`
+- `sdk.ImageEditModel` binds an image edit model to an `sdk.ImageEditProvider`
 - The client orchestrates tool loops, callbacks, approvals, and streaming lifecycle
 - MCP clients can load remote MCP tools and turn them into ordinary `sdk.Tool` values
 - Providers handle backend-specific HTTP, request mapping, response parsing, and SSE translation
@@ -52,6 +56,8 @@ Choose the narrowest API that matches the task:
 - Need live output: use `sdk.StreamText`
 - Need one vector: use `sdk.Embed`
 - Need multiple vectors or embedding token usage: use `sdk.EmbedMany`
+- Need image generation from a text prompt: use `sdk.GenerateImage`
+- Need image editing or inpainting: use `sdk.EditImage`
 
 If the task introduces examples or docs, prefer simple end-to-end snippets that start with:
 
@@ -67,6 +73,7 @@ If the task introduces examples or docs, prefer simple end-to-end snippets that 
 - Use `openai/codex` when the task needs OpenAI Codex coding agent models (gpt-5.x-codex series) with ChatGPT access token authentication and encrypted reasoning content.
 - Use `anthropic/messages` for Claude and Anthropic extended thinking via `WithThinking`.
 - Use `google/generativeai` for Gemini chat, tool calling, vision, streaming, and Gemini reasoning.
+- Use `openai/images` for image generation (dall-e-2, dall-e-3, gpt-image-1) and image editing via the OpenAI Images API.
 - Use `openai/embedding` or `google/embedding` for embeddings. Keep embedding-provider work separate from chat-provider work.
 
 ## Implementation Rules
@@ -99,6 +106,17 @@ When updating embeddings:
 - keep `sdk.EmbedMany` for batched requests
 - preserve `Usage.Tokens`
 - only expose dimensions/task-type behavior when the backend supports it
+
+### Image Providers
+
+Image providers are separate from chat, embedding, and speech providers. Use `sdk.ImageGenerationProvider` and/or `sdk.ImageEditProvider`.
+
+When updating image providers:
+
+- keep `sdk.GenerateImage` for generation convenience
+- keep `sdk.EditImage` for editing convenience
+- preserve `ImageUsage` token details when the backend supports them
+- support both multipart file upload and JSON reference modes for edit inputs
 
 ### Tool Calling
 
@@ -164,7 +182,7 @@ Use this structure:
 
 1. pick the correct provider package
 2. create provider with explicit options
-3. create model via `ChatModel` or `EmbeddingModel`
+3. create model via `ChatModel`, `EmbeddingModel`, `GenerationModel`, or `EditModel`
 4. call the top-level `sdk` function
 5. show minimal but idiomatic result handling
 
@@ -207,8 +225,12 @@ Use these terms consistently:
 
 - Provider: backend implementation for chat generation
 - Embedding provider: backend implementation for embeddings
+- Image generation provider: backend implementation for image generation
+- Image edit provider: backend implementation for image editing
 - Model: provider-bound chat model
 - Embedding model: provider-bound embedding model
+- Image generation model: provider-bound image generation model
+- Image edit model: provider-bound image edit model
 - Tool calling: model requests a tool invocation
 - Multi-step execution: automatic tool loop controlled by `WithMaxSteps`
 - Stream part: a typed event from `StreamText`
@@ -218,7 +240,7 @@ Use these terms consistently:
 Before finishing work in this repo, verify:
 
 - the chosen provider package matches the intended backend capabilities
-- chat and embedding concerns are not mixed accidentally
+- chat, embedding, and image concerns are not mixed accidentally
 - public examples use top-level `sdk` APIs unless lower-level behavior is the point
 - streaming logic uses typed `StreamPart` handling
 - tool-calling changes cover both inspection mode and multi-step mode when relevant

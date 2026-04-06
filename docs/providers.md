@@ -527,6 +527,123 @@ fmt.Println(result.Text)      // final answer
 
 ---
 
+## Image Providers
+
+Image providers implement the `sdk.ImageGenerationProvider` and/or `sdk.ImageEditProvider` interfaces and are separate from chat, embedding, and speech providers.
+
+```go
+type ImageGenerationProvider interface {
+    DoGenerate(ctx context.Context, params *ImageGenerationParams) (*ImageResult, error)
+}
+
+type ImageEditProvider interface {
+    DoEdit(ctx context.Context, params *ImageEditParams) (*ImageResult, error)
+}
+```
+
+### OpenAI Images Provider
+
+The `provider/openai/images` package provides image generation and editing via the OpenAI Images API (`/images/generations` and `/images/edits`).
+
+#### Basic Usage
+
+```go
+import (
+    "github.com/memohai/twilight-ai/provider/openai/images"
+    "github.com/memohai/twilight-ai/sdk"
+)
+
+provider := images.New(
+    images.WithAPIKey("sk-..."),
+)
+
+// Generation
+genModel := provider.GenerationModel("gpt-image-1")
+result, err := sdk.GenerateImage(ctx,
+    sdk.WithImageGenerationModel(genModel),
+    sdk.WithImagePrompt("A sunset over mountains"),
+    sdk.WithImageSize("1024x1024"),
+)
+
+// Editing
+editModel := provider.EditModel("gpt-image-1")
+result, err := sdk.EditImage(ctx,
+    sdk.WithImageEditModel(editModel),
+    sdk.WithEditPrompt("Add a rainbow"),
+    sdk.WithEditImages(sdk.ImageInput{
+        Data:     pngBytes,
+        Filename: "photo.png",
+    }),
+)
+```
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+#### Supported Models
+
+| Model | Generation | Editing | Notes |
+|-------|-----------|---------|-------|
+| `dall-e-2` | Yes | Yes | Legacy; `size`: 256/512/1024; `n`: 1-10 |
+| `dall-e-3` | Yes | No | `n` must be 1; supports `style` (vivid/natural) |
+| `gpt-image-1` | Yes | Yes | GPT Image; supports `background`, `output_format`, `moderation` |
+| `gpt-image-1-mini` | Yes | Yes | Smaller GPT Image variant |
+| `gpt-image-1.5` | Yes | Yes | Latest GPT Image |
+
+#### Generation Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `Prompt` | string | **Required.** Text description of the desired image |
+| `N` | *int | Number of images (1-10; dall-e-3 only supports 1) |
+| `Size` | string | Image size (e.g. `"1024x1024"`, `"1536x1024"`) |
+| `Quality` | string | `"auto"`, `"low"`, `"medium"`, `"high"`, `"standard"`, `"hd"` |
+| `Style` | string | dall-e-3 only: `"vivid"`, `"natural"` |
+| `ResponseFormat` | string | dall-e-2/3: `"url"`, `"b64_json"` |
+| `Background` | string | GPT Image: `"transparent"`, `"opaque"`, `"auto"` |
+| `OutputFormat` | string | GPT Image: `"png"`, `"jpeg"`, `"webp"` |
+| `OutputCompression` | *int | GPT Image, jpeg/webp: 0-100 |
+| `Moderation` | string | GPT Image: `"low"`, `"auto"` |
+
+#### Edit Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `Images` | []ImageInput | Source images (up to 16 for GPT Image) |
+| `Prompt` | string | **Required.** Edit description |
+| `Mask` | *ImageInput | Mask image (transparent regions = edit area) |
+| `InputFidelity` | string | GPT Image: `"high"`, `"low"` |
+| Other params | — | Same as generation: `N`, `Size`, `Quality`, `Background`, `OutputFormat`, `OutputCompression`, `Moderation` |
+
+#### Edit Input Modes
+
+The provider automatically selects the request format based on the `ImageInput` fields:
+
+| `ImageInput` field set | Request format | Use case |
+|----------------------|----------------|----------|
+| `Data` ([]byte) | `multipart/form-data` | File upload (local images) |
+| `URL` or `FileID` | JSON body | URL/file-ID reference (GPT Image) |
+
+#### OpenAI-Compatible Endpoints
+
+Any service implementing the OpenAI Images API works with `WithBaseURL`:
+
+```go
+provider := images.New(
+    images.WithAPIKey("your-key"),
+    images.WithBaseURL("https://your-compatible-api.com/v1"),
+)
+```
+
+See [Images](images.md) for complete documentation.
+
+---
+
 ## Embedding Providers
 
 Embedding providers implement the `sdk.EmbeddingProvider` interface and are separate from chat providers. They generate vector representations of text for use in search, retrieval, clustering, and other similarity-based tasks.
@@ -817,6 +934,7 @@ text, err := sdk.GenerateText(ctx,
 
 ## Next Steps
 
+- [Images](images.md) — generate and edit images with OpenAI image models
 - [Embeddings](embeddings.md) — generate vector embeddings with OpenAI and Google
 - [Speech](speech.md) — speech synthesis with Edge TTS and custom providers
 - [Tool Calling](tools.md) — define tools and enable multi-step execution

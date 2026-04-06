@@ -543,6 +543,233 @@ type ResponseMetadata struct {
 
 ---
 
+### Image Generation & Editing
+
+#### ImageGenerationProvider
+
+```go
+type ImageGenerationProvider interface {
+    DoGenerate(ctx context.Context, params *ImageGenerationParams) (*ImageResult, error)
+}
+```
+
+The interface that image generation backends must implement.
+
+#### ImageEditProvider
+
+```go
+type ImageEditProvider interface {
+    DoEdit(ctx context.Context, params *ImageEditParams) (*ImageResult, error)
+}
+```
+
+The interface that image editing backends must implement.
+
+#### ImageGenerationModel
+
+```go
+type ImageGenerationModel struct {
+    ID       string
+    Provider ImageGenerationProvider
+}
+```
+
+Represents an image generation model bound to an `ImageGenerationProvider`.
+
+#### ImageEditModel
+
+```go
+type ImageEditModel struct {
+    ID       string
+    Provider ImageEditProvider
+}
+```
+
+Represents an image edit model bound to an `ImageEditProvider`.
+
+#### ImageGenerationParams
+
+```go
+type ImageGenerationParams struct {
+    Model             *ImageGenerationModel
+    Prompt            string
+    N                 *int
+    Size              string
+    Quality           string
+    Style             string
+    ResponseFormat    string
+    Background        string
+    OutputFormat      string
+    OutputCompression *int
+    Moderation        string
+    User              string
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `Model` | **Required.** The image generation model to use |
+| `Prompt` | **Required.** Text description of the desired image |
+| `N` | Number of images (1-10; dall-e-3 only supports 1) |
+| `Size` | Image size (e.g. `"1024x1024"`, `"1536x1024"`) |
+| `Quality` | `"auto"`, `"low"`, `"medium"`, `"high"`, `"standard"`, `"hd"` |
+| `Style` | dall-e-3 only: `"vivid"`, `"natural"` |
+| `ResponseFormat` | dall-e-2/3: `"url"`, `"b64_json"` |
+| `Background` | GPT Image: `"transparent"`, `"opaque"`, `"auto"` |
+| `OutputFormat` | GPT Image: `"png"`, `"jpeg"`, `"webp"` |
+| `OutputCompression` | GPT Image, jpeg/webp: 0-100 |
+| `Moderation` | GPT Image: `"low"`, `"auto"` |
+| `User` | End-user identifier |
+
+#### ImageEditParams
+
+```go
+type ImageEditParams struct {
+    Model             *ImageEditModel
+    Images            []ImageInput
+    Prompt            string
+    Mask              *ImageInput
+    N                 *int
+    Size              string
+    Quality           string
+    Background        string
+    OutputFormat      string
+    OutputCompression *int
+    InputFidelity     string
+    Moderation        string
+    ResponseFormat    string
+    User              string
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `Model` | **Required.** The image edit model to use |
+| `Images` | Source images (up to 16 for GPT Image models) |
+| `Prompt` | **Required.** Description of the edit |
+| `Mask` | Mask image (transparent regions = edit area) |
+| `InputFidelity` | GPT Image: `"high"`, `"low"` |
+| Other fields | Same semantics as `ImageGenerationParams` |
+
+#### ImageInput
+
+```go
+type ImageInput struct {
+    Data      []byte
+    MediaType string
+    Filename  string
+    URL       string
+    FileID    string
+}
+```
+
+Exactly one of `Data`, `URL`, or `FileID` should be set. When `Data` is set, the provider uses `multipart/form-data`; otherwise JSON.
+
+#### ImageResult
+
+```go
+type ImageResult struct {
+    Created int64
+    Data    []ImageData
+    Usage   ImageUsage
+}
+```
+
+#### ImageData
+
+```go
+type ImageData struct {
+    B64JSON       string
+    URL           string
+    RevisedPrompt string
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `B64JSON` | Base64-encoded image (GPT Image default; dall-e with `b64_json` format) |
+| `URL` | Temporary URL (dall-e-2/3 with `url` format; valid ~60 minutes) |
+| `RevisedPrompt` | dall-e-3 only: the model's revised prompt |
+
+#### ImageUsage
+
+```go
+type ImageUsage struct {
+    TotalTokens       int
+    InputTokens       int
+    OutputTokens      int
+    InputTokenDetails *ImageInputTokenDetails
+}
+
+type ImageInputTokenDetails struct {
+    TextTokens  int
+    ImageTokens int
+}
+```
+
+#### Image Generate Options
+
+All options are of type `ImageGenerateOption` (`func(*imageGenerateConfig)`).
+
+| Function | Description |
+|----------|-------------|
+| `WithImageGenerationModel(model)` | **Required.** The image generation model |
+| `WithImagePrompt(prompt)` | **Required.** Text description |
+| `WithImageN(n)` | Number of images |
+| `WithImageSize(size)` | Image dimensions |
+| `WithImageQuality(quality)` | Quality level |
+| `WithImageStyle(style)` | dall-e-3 style |
+| `WithImageResponseFormat(format)` | dall-e-2/3 response format |
+| `WithImageBackground(bg)` | GPT Image background |
+| `WithImageOutputFormat(format)` | GPT Image output format |
+| `WithImageOutputCompression(n)` | Compression level |
+| `WithImageModeration(mod)` | GPT Image moderation |
+| `WithImageUser(user)` | End-user identifier |
+
+#### Image Edit Options
+
+All options are of type `ImageEditOption` (`func(*imageEditConfig)`).
+
+| Function | Description |
+|----------|-------------|
+| `WithImageEditModel(model)` | **Required.** The image edit model |
+| `WithEditPrompt(prompt)` | **Required.** Edit description |
+| `WithEditImages(images...)` | Source images |
+| `WithEditMask(mask)` | Mask image |
+| `WithEditN(n)` | Number of images |
+| `WithEditSize(size)` | Output size |
+| `WithEditQuality(quality)` | Quality level |
+| `WithEditBackground(bg)` | Background transparency |
+| `WithEditOutputFormat(format)` | Output format |
+| `WithEditOutputCompression(n)` | Compression level |
+| `WithEditInputFidelity(fidelity)` | Input fidelity |
+| `WithEditModeration(mod)` | Moderation level |
+| `WithEditResponseFormat(format)` | dall-e-2 response format |
+| `WithEditUser(user)` | End-user identifier |
+
+#### Client Methods
+
+```go
+func (c *Client) GenerateImage(ctx context.Context, options ...ImageGenerateOption) (*ImageResult, error)
+func (c *Client) EditImage(ctx context.Context, options ...ImageEditOption) (*ImageResult, error)
+```
+
+| Method | Description |
+|--------|-------------|
+| `GenerateImage` | Generates images from a text prompt |
+| `EditImage` | Edits or extends images given a prompt |
+
+#### Package-Level Functions
+
+```go
+func GenerateImage(ctx context.Context, options ...ImageGenerateOption) (*ImageResult, error)
+func EditImage(ctx context.Context, options ...ImageEditOption) (*ImageResult, error)
+```
+
+These use the default client instance.
+
+---
+
 ### Embedding
 
 #### EmbeddingProvider
@@ -804,6 +1031,57 @@ func LookupVoiceLang(voiceID string) (string, bool)
 ```
 
 Returns the language tag for a voice ID, or `("", false)` if unknown.
+
+---
+
+## Package `provider/openai/images`
+
+### Provider
+
+```go
+type Provider struct { /* unexported */ }
+
+func New(options ...Option) *Provider
+```
+
+Implements `sdk.ImageGenerationProvider` and `sdk.ImageEditProvider`. Uses the OpenAI Images API (`/images/generations` and `/images/edits`).
+
+#### Options
+
+```go
+type Option func(*Provider)
+
+func WithAPIKey(apiKey string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+#### Methods
+
+```go
+func (p *Provider) GenerationModel(id string) *sdk.ImageGenerationModel
+func (p *Provider) EditModel(id string) *sdk.ImageEditModel
+func (p *Provider) DoGenerate(ctx context.Context, params *sdk.ImageGenerationParams) (*sdk.ImageResult, error)
+func (p *Provider) DoEdit(ctx context.Context, params *sdk.ImageEditParams) (*sdk.ImageResult, error)
+```
+
+| Method | Description |
+|--------|-------------|
+| `GenerationModel(id)` | Creates an `ImageGenerationModel` bound to this provider |
+| `EditModel(id)` | Creates an `ImageEditModel` bound to this provider |
+| `DoGenerate` | Sends `POST /images/generations` (JSON) |
+| `DoEdit` | Sends `POST /images/edits` (multipart when `Data` bytes present, JSON otherwise) |
+
+#### Supported Models
+
+- Generation: `dall-e-2`, `dall-e-3`, `gpt-image-1`, `gpt-image-1-mini`, `gpt-image-1.5`
+- Editing: `gpt-image-1`, `gpt-image-1-mini`, `gpt-image-1.5`, `dall-e-2`
 
 ---
 

@@ -7,7 +7,7 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 
 ## Features
 
-- **Simple API** — `GenerateText`, `StreamText`, `Embed`, `EmbedMany`, `GenerateSpeech`, and `StreamSpeech` cover most use cases
+- **Simple API** — `GenerateText`, `StreamText`, `Embed`, `EmbedMany`, `GenerateImage`, `EditImage`, `GenerateSpeech`, and `StreamSpeech` cover most use cases
 - **Provider-agnostic** — swap between OpenAI, Anthropic, Google, Edge TTS, or any OpenAI-compatible endpoint
 - **Model discovery** — `ListModels` fetches available models, `Test` checks provider connectivity and model support
 - **Tool calling** — define tools with Go structs, SDK infers JSON Schema and handles multi-step execution
@@ -16,6 +16,7 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 - **Multi-step execution** — automatic tool-call loop with configurable `MaxSteps`
 - **Rich message types** — text, images, files, reasoning content, tool calls/results
 - **Embeddings** — generate embeddings with `Embed` / `EmbedMany`, supports OpenAI and Google providers
+- **Image generation** — generate and edit images with `GenerateImage` / `EditImage`, supports dall-e-2, dall-e-3, and gpt-image-1
 - **Speech synthesis** — generate speech with `GenerateSpeech` / `StreamSpeech`, supports Edge TTS with an open provider model
 - **Approval flow** — optional human-in-the-loop approval for sensitive tool calls
 
@@ -249,6 +250,39 @@ Twilight AI converts `mcp.Tool` definitions into `sdk.Tool` automatically:
 - tool execution calls `session.CallTool(...)` under the hood
 - MCP text content is returned as the tool output passed back into the model
 
+### Image Generation
+
+Generate images from text prompts using OpenAI's image models:
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/images"
+
+provider := images.New(images.WithAPIKey("sk-..."))
+model := provider.GenerationModel("gpt-image-1")
+
+result, err := sdk.GenerateImage(ctx,
+    sdk.WithImageGenerationModel(model),
+    sdk.WithImagePrompt("A sunset over mountains, oil painting style"),
+    sdk.WithImageSize("1024x1024"),
+)
+// result.Data[0].B64JSON contains the base64-encoded image
+```
+
+Edit existing images with inpainting or extensions:
+
+```go
+model := provider.EditModel("gpt-image-1")
+
+result, err := sdk.EditImage(ctx,
+    sdk.WithImageEditModel(model),
+    sdk.WithEditPrompt("Add a rainbow in the sky"),
+    sdk.WithEditImages(sdk.ImageInput{
+        Data:     pngBytes,
+        Filename: "photo.png",
+    }),
+)
+```
+
 ### Embeddings
 
 Generate vector embeddings for text using OpenAI or Google:
@@ -361,6 +395,7 @@ if testResult.Supported {
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation, setup, and first request |
 | [Providers](docs/providers.md) | Provider interface, OpenAI, Anthropic, and Google Gemini |
+| [Images](docs/images.md) | Generate and edit images with OpenAI image models |
 | [Embeddings](docs/embeddings.md) | Generate vector embeddings with OpenAI and Google |
 | [Speech](docs/speech.md) | Speech synthesis with Edge TTS and custom providers |
 | [Tool Calling](docs/tools.md) | Defining local tools, MCP tools, multi-step execution, approval flow |
@@ -378,6 +413,7 @@ if testResult.Supported {
 | OpenRouter Responses | `responses.New()` + `WithBaseURL` | `/responses` | ✅ Stable |
 | Anthropic | `messages.New()` | `/messages` | ✅ Stable |
 | Google Gemini | `generativeai.New()` | Generative AI API | ✅ Stable |
+| OpenAI Images | `images.New()` | `/images/generations`, `/images/edits` | ✅ Stable |
 | OpenAI Embeddings | `embedding.New()` | `/embeddings` | ✅ Stable |
 | Google Embeddings | `embedding.New()` | `embedContent` / `batchEmbedContents` | ✅ Stable |
 | Edge TTS | `speech.New()` | Bing WebSocket | ✅ Stable |

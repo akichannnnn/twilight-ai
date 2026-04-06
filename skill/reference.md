@@ -12,6 +12,7 @@ Use it when the task needs exact package names, exported types, function signatu
 - `github.com/memohai/twilight-ai/provider/anthropic/messages`
 - `github.com/memohai/twilight-ai/provider/google/generativeai`
 - `github.com/memohai/twilight-ai/provider/openai/codex`
+- `github.com/memohai/twilight-ai/provider/openai/images`
 - `github.com/memohai/twilight-ai/provider/openai/embedding`
 - `github.com/memohai/twilight-ai/provider/google/embedding`
 
@@ -29,12 +30,16 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*StreamResult, error)
 func (c *Client) Embed(ctx context.Context, value string, options ...EmbedOption) ([]float64, error)
 func (c *Client) EmbedMany(ctx context.Context, values []string, options ...EmbedOption) (*EmbedResult, error)
+func (c *Client) GenerateImage(ctx context.Context, options ...ImageGenerateOption) (*ImageResult, error)
+func (c *Client) EditImage(ctx context.Context, options ...ImageEditOption) (*ImageResult, error)
 
 func GenerateText(ctx context.Context, options ...GenerateOption) (string, error)
 func GenerateTextResult(ctx context.Context, options ...GenerateOption) (*GenerateResult, error)
 func StreamText(ctx context.Context, options ...GenerateOption) (*StreamResult, error)
 func Embed(ctx context.Context, value string, options ...EmbedOption) ([]float64, error)
 func EmbedMany(ctx context.Context, values []string, options ...EmbedOption) (*EmbedResult, error)
+func GenerateImage(ctx context.Context, options ...ImageGenerateOption) (*ImageResult, error)
+func EditImage(ctx context.Context, options ...ImageEditOption) (*ImageResult, error)
 ```
 
 ### Provider Contracts
@@ -595,6 +600,124 @@ func WithEmbeddingModel(model *EmbeddingModel) EmbedOption
 func WithDimensions(d int) EmbedOption
 ```
 
+### Image Generation & Editing
+
+```go
+type ImageGenerationProvider interface {
+    DoGenerate(ctx context.Context, params *ImageGenerationParams) (*ImageResult, error)
+}
+
+type ImageEditProvider interface {
+    DoEdit(ctx context.Context, params *ImageEditParams) (*ImageResult, error)
+}
+
+type ImageGenerationModel struct {
+    ID       string
+    Provider ImageGenerationProvider
+}
+
+type ImageEditModel struct {
+    ID       string
+    Provider ImageEditProvider
+}
+
+type ImageGenerationParams struct {
+    Model             *ImageGenerationModel
+    Prompt            string
+    N                 *int
+    Size              string
+    Quality           string
+    Style             string
+    ResponseFormat    string
+    Background        string
+    OutputFormat      string
+    OutputCompression *int
+    Moderation        string
+    User              string
+}
+
+type ImageEditParams struct {
+    Model             *ImageEditModel
+    Images            []ImageInput
+    Prompt            string
+    Mask              *ImageInput
+    N                 *int
+    Size              string
+    Quality           string
+    Background        string
+    OutputFormat      string
+    OutputCompression *int
+    InputFidelity     string
+    Moderation        string
+    ResponseFormat    string
+    User              string
+}
+
+type ImageInput struct {
+    Data      []byte
+    MediaType string
+    Filename  string
+    URL       string
+    FileID    string
+}
+
+type ImageResult struct {
+    Created int64
+    Data    []ImageData
+    Usage   ImageUsage
+}
+
+type ImageData struct {
+    B64JSON       string
+    URL           string
+    RevisedPrompt string
+}
+
+type ImageUsage struct {
+    TotalTokens       int
+    InputTokens       int
+    OutputTokens      int
+    InputTokenDetails *ImageInputTokenDetails
+}
+
+type ImageInputTokenDetails struct {
+    TextTokens  int
+    ImageTokens int
+}
+
+type ImageGenerateOption func(*imageGenerateConfig)
+
+func WithImageGenerationModel(model *ImageGenerationModel) ImageGenerateOption
+func WithImagePrompt(prompt string) ImageGenerateOption
+func WithImageN(n int) ImageGenerateOption
+func WithImageSize(size string) ImageGenerateOption
+func WithImageQuality(quality string) ImageGenerateOption
+func WithImageStyle(style string) ImageGenerateOption
+func WithImageResponseFormat(format string) ImageGenerateOption
+func WithImageBackground(background string) ImageGenerateOption
+func WithImageOutputFormat(format string) ImageGenerateOption
+func WithImageOutputCompression(compression int) ImageGenerateOption
+func WithImageModeration(moderation string) ImageGenerateOption
+func WithImageUser(user string) ImageGenerateOption
+
+type ImageEditOption func(*imageEditConfig)
+
+func WithImageEditModel(model *ImageEditModel) ImageEditOption
+func WithEditImages(images ...ImageInput) ImageEditOption
+func WithEditPrompt(prompt string) ImageEditOption
+func WithEditMask(mask *ImageInput) ImageEditOption
+func WithEditN(n int) ImageEditOption
+func WithEditSize(size string) ImageEditOption
+func WithEditQuality(quality string) ImageEditOption
+func WithEditBackground(background string) ImageEditOption
+func WithEditOutputFormat(format string) ImageEditOption
+func WithEditOutputCompression(compression int) ImageEditOption
+func WithEditInputFidelity(fidelity string) ImageEditOption
+func WithEditModeration(moderation string) ImageEditOption
+func WithEditResponseFormat(format string) ImageEditOption
+func WithEditUser(user string) ImageEditOption
+```
+
 ## Package `provider/openai/completions`
 
 Implements the OpenAI Chat Completions API and OpenAI-compatible `/chat/completions` backends.
@@ -883,6 +1006,41 @@ Behavior notes:
 - single-value embedding uses `embedContent`
 - multi-value embedding uses `batchEmbedContents`
 
+## Package `provider/openai/images`
+
+Implements the OpenAI Images API for image generation (`/images/generations`) and editing (`/images/edits`).
+
+```go
+type Provider struct { /* unexported fields */ }
+
+type Option func(*Provider)
+
+func WithAPIKey(apiKey string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
+func New(options ...Option) *Provider
+
+func (p *Provider) GenerationModel(id string) *sdk.ImageGenerationModel
+func (p *Provider) EditModel(id string) *sdk.ImageEditModel
+func (p *Provider) DoGenerate(ctx context.Context, params *sdk.ImageGenerationParams) (*sdk.ImageResult, error)
+func (p *Provider) DoEdit(ctx context.Context, params *sdk.ImageEditParams) (*sdk.ImageResult, error)
+```
+
+Default option values:
+
+- `WithBaseURL`: `https://api.openai.com/v1`
+- `WithHTTPClient`: `&http.Client{}`
+
+Supported models:
+
+- Generation: `dall-e-2`, `dall-e-3`, `gpt-image-1`, `gpt-image-1-mini`, `gpt-image-1.5`
+- Editing: `gpt-image-1`, `gpt-image-1-mini`, `gpt-image-1.5`, `dall-e-2`
+
+Edit behavior:
+
+- When `ImageInput.Data` (raw bytes) is provided, the request is sent as `multipart/form-data`
+- When `ImageInput.URL` or `ImageInput.FileID` is provided, the request is sent as JSON
+
 ## Selection Cheatsheet
 
 - Broad OpenAI-compatible chat API: `provider/openai/completions`
@@ -890,5 +1048,6 @@ Behavior notes:
 - OpenAI Codex coding agents with encrypted reasoning: `provider/openai/codex`
 - Claude and extended thinking: `provider/anthropic/messages`
 - Gemini chat and tool calling: `provider/google/generativeai`
+- OpenAI image generation and editing (dall-e, gpt-image): `provider/openai/images`
 - OpenAI-compatible embeddings: `provider/openai/embedding`
 - Gemini embeddings with task-type tuning: `provider/google/embedding`

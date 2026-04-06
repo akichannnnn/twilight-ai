@@ -172,7 +172,16 @@ func AuthHeader(token string) map[string]string {
 	}
 }
 
+// BuildURL joins baseURL and path into a full URL string.
+func BuildURL(baseURL, path string) (string, error) {
+	return buildURLWithQuery(baseURL, path, nil)
+}
+
 func buildURL(baseURL, path string, query map[string]string) (string, error) {
+	return buildURLWithQuery(baseURL, path, query)
+}
+
+func buildURLWithQuery(baseURL, path string, query map[string]string) (string, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid base URL: %w", err)

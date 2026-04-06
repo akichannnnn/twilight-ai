@@ -44,4 +44,14 @@ func StreamSpeech(ctx context.Context, options ...SpeechOption) (*SpeechStreamRe
 	return defaultClient.StreamSpeech(ctx, options...)
 }
 
+// --- Image convenience functions ---
+
+func GenerateImage(ctx context.Context, options ...ImageGenerateOption) (*ImageResult, error) {
+	return defaultClient.GenerateImage(ctx, options...)
+}
+
+func EditImage(ctx context.Context, options ...ImageEditOption) (*ImageResult, error) {
+	return defaultClient.EditImage(ctx, options...)
+}
+
 var defaultClient = &Client{}

@@ -1,0 +1,157 @@
+// Package speech provides an OpenAI-compatible TTS provider that targets the
+// /audio/speech endpoint.  The same implementation works for the official
+// OpenAI API as well as any drop-in proxy (OpenRouter, CometAPI, Player2,
+// Index-TTS vLLM, unspeech, etc.) by pointing BaseURL at the proxy.
+package speech
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/twilight-ai/internal/utils"
+)
+
+const (
+	defaultModelID   = "gpt-4o-mini-tts"
+	defaultBaseURL   = "https://api.openai.com/v1"
+	defaultVoice     = "coral"
+	defaultFormat    = "mp3"
+	contentTypeAudio = "audio/mpeg"
+)
+
+// Option configures the OpenAI TTS provider.
+type Option func(*Provider)
+
+// WithAPIKey sets the API key used for Bearer authentication.
+func WithAPIKey(key string) Option {
+	return func(p *Provider) { p.apiKey = key }
+}
+
+// WithBaseURL overrides the API base URL (useful for proxies and testing).
+func WithBaseURL(url string) Option {
+	return func(p *Provider) { p.baseURL = url }
+}
+
+// WithHTTPClient replaces the default HTTP client.
+func WithHTTPClient(hc *http.Client) Option {
+	return func(p *Provider) { p.httpClient = hc }
+}
+
+// Provider implements sdk.SpeechProvider for the OpenAI /audio/speech API.
+type Provider struct {
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
+}
+
+// New creates a new OpenAI TTS provider.
+func New(opts ...Option) *Provider {
+	p := &Provider{
+		baseURL:    defaultBaseURL,
+		httpClient: &http.Client{},
+	}
+	for _, o := range opts {
+		o(p)
+	}
+	p.baseURL = strings.TrimRight(p.baseURL, "/")
+	return p
+}
+
+// SpeechModel creates a SpeechModel bound to this provider.
+func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
+	if id == "" {
+		id = defaultModelID
+	}
+	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// DoSynthesize synthesizes speech and returns the complete audio bytes.
+func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
+	cfg := parseConfig(params.Config)
+
+	modelID := defaultModelID
+	if params.Model != nil && params.Model.ID != "" {
+		modelID = params.Model.ID
+	}
+
+	body, err := p.doRequest(ctx, modelID, params.Text, cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	audio, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("openai speech: read response: %w", err)
+	}
+	return &sdk.SpeechResult{
+		Audio:       audio,
+		ContentType: contentTypeForFormat(cfg.ResponseFormat),
+	}, nil
+}
+
+// DoStream synthesizes speech and returns a streaming result backed by chunked HTTP body.
+func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
+	cfg := parseConfig(params.Config)
+
+	modelID := defaultModelID
+	if params.Model != nil && params.Model.ID != "" {
+		modelID = params.Model.ID
+	}
+
+	body, err := p.doRequest(ctx, modelID, params.Text, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	ch, errCh := utils.StreamHTTPBody(ctx, body, "openai speech")
+	return sdk.NewSpeechStreamResult(ch, contentTypeForFormat(cfg.ResponseFormat), errCh), nil
+}
+
+// doRequest sends a POST /audio/speech request and returns the raw response body.
+func (p *Provider) doRequest(ctx context.Context, model, text string, cfg audioConfig) (io.ReadCloser, error) {
+	reqBody := map[string]any{
+		"model":           model,
+		"input":           text,
+		"voice":           cfg.Voice,
+		"response_format": cfg.ResponseFormat,
+	}
+	if cfg.Speed != 0 {
+		reqBody["speed"] = cfg.Speed
+	}
+	// instructions is only supported by gpt-4o-mini-tts; ignore for other models.
+	if cfg.Instructions != "" && strings.Contains(model, "gpt-4o-mini-tts") {
+		reqBody["instructions"] = cfg.Instructions
+	}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("openai speech: marshal request: %w", err)
+	}
+
+	url := p.baseURL + "/audio/speech"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("openai speech: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openai speech: request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("openai speech: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+	return resp.Body, nil
+}

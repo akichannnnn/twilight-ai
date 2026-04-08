@@ -828,6 +828,295 @@ result, err := sdk.GenerateSpeech(ctx,
 |--------|---------|-------------|
 | `WithBaseURL(url)` | Bing WSS endpoint | Override WebSocket endpoint (for testing) |
 
+---
+
+### OpenAI TTS Provider
+
+The `provider/openai/speech` package targets the `/audio/speech` endpoint. It works with the official OpenAI TTS API and any OpenAI-compatible proxy (OpenRouter, CometAPI, Player2, Index-TTS vLLM, unspeech, etc.).
+
+#### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("sk-..."),
+)
+model := provider.SpeechModel("tts-1")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hello, world!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice": "alloy",
+    }),
+)
+```
+
+#### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice` | `string` | `alloy` | Voice ID: alloy/ash/ballad/coral/echo/fable/onyx/nova/shimmer |
+| `response_format` | `string` | `mp3` | Output format: mp3/opus/aac/flac/wav/pcm |
+| `speed` | `float64` | `0` (server default) | Speech rate 0.25–4.0 |
+| `instructions` | `string` | `""` | Style instructions (gpt-4o-mini-tts only) |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key for `Authorization: Bearer` |
+| `WithBaseURL(url)` | `https://api.openai.com/v1` | Override for proxies or testing |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+#### OpenAI-Compatible Endpoints
+
+```go
+// OpenRouter
+provider := speech.New(
+    speech.WithAPIKey("sk-or-v1-..."),
+    speech.WithBaseURL("https://openrouter.ai/api/v1"),
+)
+
+// Local Index-TTS via vLLM
+provider := speech.New(
+    speech.WithBaseURL("http://localhost:8000/v1"),
+)
+```
+
+---
+
+### ElevenLabs TTS Provider
+
+The `provider/elevenlabs/speech` package targets the `/v1/text-to-speech/{voice_id}` (full) and `/v1/text-to-speech/{voice_id}/stream` (streaming) endpoints.
+
+#### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/elevenlabs/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-elevenlabs-key"),
+)
+model := provider.SpeechModel("elevenlabs-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hello!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice_id": "21m00Tcm4TlvDq8ikWAM",
+        "model_id": "eleven_multilingual_v2",
+    }),
+)
+```
+
+#### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice_id` | `string` | `""` | **Required.** ElevenLabs voice ID |
+| `model_id` | `string` | `eleven_multilingual_v2` | Model: eleven_turbo_v2_5/eleven_v3/… |
+| `stability` | `float64` | `0.5` | Voice stability 0–1 |
+| `similarity_boost` | `float64` | `0.75` | Voice similarity boost 0–1 |
+| `output_format` | `string` | `mp3_44100_128` | Output format: mp3_44100_128/pcm_16000/… |
+| `speed` | `float64` | `0` (server default) | Speech rate 0.25–4.0 |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `xi-api-key` header |
+| `WithBaseURL(url)` | `https://api.elevenlabs.io` | Override base URL |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+---
+
+### Deepgram TTS Provider
+
+The `provider/deepgram/speech` package targets the `POST /v1/speak` endpoint using `Authorization: Token` authentication.
+
+#### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/deepgram/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-deepgram-key"),
+)
+model := provider.SpeechModel("deepgram-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hello!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "model": "aura-2-asteria-en",
+    }),
+)
+```
+
+#### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `model` | `string` | `aura-2-asteria-en` | Voice model: aura-2-*/aura-* series |
+| `encoding` | `string` | `""` | Audio encoding: linear16/mulaw/alaw |
+| `sample_rate` | `int` | `0` (server default) | Sample rate in Hz |
+| `container` | `string` | `""` | Container format: wav/none |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `Authorization: Token` |
+| `WithBaseURL(url)` | `https://api.deepgram.com` | Override base URL |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+---
+
+### MiniMax TTS Provider
+
+The `provider/minimax/speech` package targets the `POST /v1/t2a_v2` endpoint. The API returns audio as a hex-encoded string inside a JSON response; this provider decodes it automatically.
+
+#### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/minimax/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-minimax-key"),
+)
+model := provider.SpeechModel("minimax-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("你好，世界！"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice_id": "Chinese_narrator_female",
+        "model":    "speech-2.8-hd",
+    }),
+)
+```
+
+#### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice_id` | `string` | `English_expressive_narrator` | Voice ID |
+| `model` | `string` | `speech-2.8-hd` | Model version |
+| `speed` | `float64` | `0` (server default) | Speech speed |
+| `vol` | `float64` | `0` (server default) | Volume |
+| `pitch` | `int` | `0` | Pitch adjustment |
+| `output_format` | `string` | `mp3` | Output format: mp3/pcm/flac/wav |
+| `sample_rate` | `int` | `32000` | Sample rate in Hz |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key for `Authorization: Bearer` |
+| `WithBaseURL(url)` | `https://api.minimax.io` | Override base URL |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+> **Note:** MiniMax streaming TTS is a paid-tier API feature. `DoStream` returns the fully synthesized audio as a single chunk (equivalent to `DoSynthesize`).
+
+---
+
+### Alibaba Cloud DashScope CosyVoice Provider
+
+The `provider/alibabacloud/speech` package implements the DashScope CosyVoice WebSocket protocol (`wss://dashscope.aliyuncs.com/api-ws/v1/inference/`). It uses the `run-task` / `continue-task` / `finish-task` message flow with Bearer authentication during the WebSocket handshake.
+
+#### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/alibabacloud/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-dashscope-api-key"),
+)
+model := provider.SpeechModel("cosyvoice-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("你好，世界！"),
+    sdk.WithSpeechConfig(map[string]any{
+        "model": "cosyvoice-v1",
+        "voice": "longanyang",
+    }),
+)
+```
+
+#### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `model` | `string` | `cosyvoice-v1` | CosyVoice model: cosyvoice-v1/cosyvoice-v2/cosyvoice-v3-flash/… |
+| `voice` | `string` | `""` | Voice ID (system voice or custom clone ID) |
+| `format` | `string` | `mp3` | Output format: mp3/wav/pcm/opus |
+| `sample_rate` | `int` | `22050` | Sample rate in Hz |
+| `volume` | `int` | `0` (server default) | Volume 0–100 |
+| `rate` | `float64` | `0` (server default) | Speech rate 0.5–2.0 |
+| `pitch` | `float64` | `0` (server default) | Pitch multiplier 0.5–2.0 |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | DashScope API key (Bearer auth during WS handshake) |
+| `WithBaseURL(url)` | `wss://dashscope.aliyuncs.com/api-ws/v1/inference/` | Override WebSocket endpoint |
+
+---
+
+### Volcengine SAMI TTS Provider
+
+The `provider/volcengine/speech` package implements the Volcengine SAMI (Speech Audio Machine Intelligence) TTS API. Authentication uses a two-step process: first obtain a bearer token via `open.volcengineapi.com/GetToken` (signed with Volcengine V4 HMAC-SHA256), then call `POST https://sami.bytedance.com/api/v1/invoke`.
+
+#### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/volcengine/speech"
+
+provider := speech.New(
+    speech.WithAccessKey("your-access-key"),
+    speech.WithSecretKey("your-secret-key"),
+    speech.WithAppKey("your-app-key"),
+)
+model := provider.SpeechModel("sami-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("你好，世界！"),
+    sdk.WithSpeechConfig(map[string]any{
+        "speaker": "zh_female_qingxin",
+    }),
+)
+```
+
+Tokens obtained via `GetToken` are cached for their full validity period (1 hour) and reused automatically.
+
+#### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `speaker` | `string` | `""` | **Required.** SAMI voice speaker ID |
+| `encoding` | `string` | `mp3` | Output format: mp3/wav/aac |
+| `sample_rate` | `int` | `24000` | Sample rate in Hz |
+| `speech_rate` | `int` | `0` | Speech rate [-50, 100] (100 = 2× speed) |
+| `pitch_rate` | `int` | `0` | Pitch adjustment [-12, 12] |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAccessKey(key)` | `""` | Volcengine AccessKeyID |
+| `WithSecretKey(key)` | `""` | Volcengine SecretAccessKey |
+| `WithAppKey(key)` | `""` | SAMI Application AppKey |
+| `WithBaseURL(url)` | `https://sami.bytedance.com` | Override SAMI base URL |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+| `WithToken(token)` | `""` | Inject a static pre-obtained token (skips GetToken; useful for testing) |
+
+> **Note:** SAMI streaming is not exposed via a public non-SDK endpoint. `DoStream` wraps `DoSynthesize` and returns the fully synthesized audio as a single chunk.
+
 See [Speech](speech.md) for complete documentation including voices, streaming, and custom provider implementation.
 
 ---

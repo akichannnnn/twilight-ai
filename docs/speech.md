@@ -181,6 +181,157 @@ Popular voices:
 |--------|-------------|
 | `speech.WithBaseURL(url)` | Override the WebSocket endpoint (for testing) |
 
+## OpenAI TTS Provider
+
+The `provider/openai/speech` package targets the OpenAI `/audio/speech` endpoint and is compatible with any proxy that mirrors this API.
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("sk-..."),
+    // optional: override for proxies
+    // speech.WithBaseURL("https://openrouter.ai/api/v1"),
+)
+model := provider.SpeechModel("tts-1")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hello!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice":           "alloy",
+        "response_format": "mp3",
+        "speed":           1.0,
+    }),
+)
+```
+
+`DoStream` reads the HTTP chunked body, delivering audio in real-time.
+
+## ElevenLabs TTS Provider
+
+The `provider/elevenlabs/speech` package calls `/v1/text-to-speech/{voice_id}` for full synthesis and `/v1/text-to-speech/{voice_id}/stream` for streaming.
+
+```go
+import "github.com/memohai/twilight-ai/provider/elevenlabs/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-elevenlabs-key"),
+)
+model := provider.SpeechModel("elevenlabs-tts")
+
+sr, err := sdk.StreamSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hi there!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice_id":         "21m00Tcm4TlvDq8ikWAM",
+        "model_id":         "eleven_turbo_v2_5",
+        "stability":        0.4,
+        "similarity_boost": 0.8,
+    }),
+)
+```
+
+## Deepgram TTS Provider
+
+The `provider/deepgram/speech` package calls `POST /v1/speak` using `Authorization: Token` authentication. The response is a chunked binary audio stream.
+
+```go
+import "github.com/memohai/twilight-ai/provider/deepgram/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-deepgram-key"),
+)
+model := provider.SpeechModel("deepgram-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Greetings from Deepgram!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "model":     "aura-2-asteria-en",
+        "container": "wav",
+    }),
+)
+```
+
+## MiniMax TTS Provider
+
+The `provider/minimax/speech` package calls `POST /v1/t2a_v2`. The response is a JSON object containing the audio as a hex-encoded string; the provider decodes it automatically.
+
+```go
+import "github.com/memohai/twilight-ai/provider/minimax/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-minimax-key"),
+)
+model := provider.SpeechModel("minimax-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("你好！"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice_id": "Chinese_narrator_female",
+        "model":    "speech-2.8-hd",
+    }),
+)
+```
+
+## Alibaba Cloud DashScope CosyVoice Provider
+
+The `provider/alibabacloud/speech` package implements the WebSocket-based DashScope CosyVoice API. The provider connects to `wss://dashscope.aliyuncs.com/api-ws/v1/inference/` with Bearer auth and uses the `run-task` → `continue-task` → `finish-task` message sequence.
+
+```go
+import "github.com/memohai/twilight-ai/provider/alibabacloud/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-dashscope-api-key"),
+)
+model := provider.SpeechModel("cosyvoice-tts")
+
+sr, err := sdk.StreamSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("你好，世界！"),
+    sdk.WithSpeechConfig(map[string]any{
+        "model":  "cosyvoice-v2",
+        "voice":  "longanyang",
+        "format": "mp3",
+        "rate":   1.0,
+    }),
+)
+```
+
+`DoStream` opens a WebSocket connection and delivers audio binary frames as they arrive from the server.
+
+## Volcengine SAMI TTS Provider
+
+The `provider/volcengine/speech` package calls the Volcengine SAMI HTTP API at `https://sami.bytedance.com/api/v1/invoke`. It uses a two-step authentication flow:
+
+1. Call `open.volcengineapi.com/GetToken` — authenticated with Volcengine V4 HMAC-SHA256 signing using `access_key` + `secret_key`.
+2. Use the returned token as a URL parameter for every TTS invoke call.
+
+Tokens are cached for their full validity window (1 hour).
+
+```go
+import "github.com/memohai/twilight-ai/provider/volcengine/speech"
+
+provider := speech.New(
+    speech.WithAccessKey("your-access-key"),
+    speech.WithSecretKey("your-secret-key"),
+    speech.WithAppKey("your-app-key"),
+)
+model := provider.SpeechModel("sami-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("欢迎使用语音合成服务。"),
+    sdk.WithSpeechConfig(map[string]any{
+        "speaker":     "zh_female_qingxin",
+        "encoding":    "mp3",
+        "sample_rate": 24000,
+    }),
+)
+```
+
 ## Implementing a Custom Speech Provider
 
 To add support for a new speech backend, implement the `sdk.SpeechProvider` interface:
